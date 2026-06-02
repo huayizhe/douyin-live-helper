@@ -162,7 +162,7 @@ export const LOG = {
  */
 export const LICENSE = {
     // 客服微信号（半自动收款：用户付款后联系你领取密钥）
-    CONTACT_WECHAT: '你的微信号',
+    CONTACT_WECHAT: 'cxjingxuan',
 
     // 购买说明页（可选，留空则只显示微信）。阶段二可换成爱发电商品链接
     BUY_URL: '',
