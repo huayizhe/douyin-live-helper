@@ -1,0 +1,360 @@
+.follow-live-menu {
+  display: flex;
+  align-items: center;
+  padding: 12px 16px;
+  cursor: pointer;
+  transition: background-color 0.3s;
+}
+
+.follow-live-menu:hover {
+  background-color: rgba(22, 24, 35, 0.03);
+}
+
+.menu-icon {
+  margin-right: 8px;
+  font-size: 20px;
+}
+
+.follow-live-container {
+  position: fixed;
+  top: 60px;
+  left: 80px;
+  width: 320px;
+  max-height: 80vh;
+  background: white;
+  border-radius: 8px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  overflow-y: auto;
+  z-index: 1000;
+}
+
+.live-item {
+  padding: 12px;
+  border-bottom: 1px solid #f0f0f0;
+  cursor: pointer;
+}
+
+.live-preview img {
+  width: 100%;
+  height: 180px;
+  object-fit: cover;
+  border-radius: 4px;
+}
+
+.user-info {
+  display: flex;
+  align-items: center;
+  margin: 8px 0;
+}
+
+.user-avatar {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  margin-right: 8px;
+}
+
+.live-stats {
+  display: flex;
+  justify-content: space-between;
+  color: #666;
+  font-size: 12px;
+}
+
+.follow-live-button {
+  display: flex;
+  align-items: center;
+  height: 36px;
+  padding: 0 16px;
+  background: transparent;
+  color: #161823;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background-color 0.3s;
+  margin-left: 12px;
+}
+
+.follow-live-button:hover {
+  background: rgba(22, 24, 35, 0.06);
+}
+
+.live-icon {
+  margin-right: 6px;
+  font-size: 18px;
+}
+
+.live-modal {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  z-index: 9999;
+}
+
+.live-modal-content {
+  background: white;
+  border-radius: 8px;
+  padding: 0 24px 24px 24px;
+  width: 90vw;
+  height: 90vh;
+  overflow-y: auto;
+  position: relative;
+}
+
+.close-button {
+  position: absolute;
+  right: 16px;
+  top: 16px;
+  font-size: 24px;
+  cursor: pointer;
+  color: #666;
+}
+
+.live-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 16px;
+  padding: 16px;
+}
+
+.live-card {
+  border-radius: 8px;
+  overflow: hidden;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  transition: transform 0.3s;
+  position: relative;
+}
+
+.live-card:hover {
+  transform: translateY(-4px);
+}
+
+.live-preview img {
+  width: 100%;
+  height: 180px;
+  object-fit: cover;
+}
+
+.live-info {
+  padding: 12px;
+  display: flex;
+  align-items: center;
+}
+
+.user-avatar {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  margin-right: 12px;
+}
+
+.user-info {
+  flex: 1;
+}
+
+.username {
+  font-weight: 600;
+  margin-bottom: 4px;
+}
+
+.viewer-count {
+  font-size: 12px;
+  color: #666;
+}
+
+.live-preview-popup {
+  position: fixed;
+  width: 320px;
+  height: 180px;
+  background: black;
+  border-radius: 8px;
+  overflow: hidden;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+  z-index: 10000;
+}
+
+.live-preview-popup video {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.loading, .no-live {
+  text-align: center;
+  padding: 32px;
+  color: #666;
+}
+
+/* 消息提示框样式 */
+.dy-toast {
+  position: fixed;
+  top: 20px;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 12px 24px;
+  background: rgba(0, 0, 0, 0.8);
+  color: white;
+  border-radius: 4px;
+  z-index: 10001;
+  animation: toast-in 0.3s ease;
+}
+
+.dy-toast.success {
+  background: rgba(40, 167, 69, 0.9);
+}
+
+.dy-toast.error {
+  background: rgba(220, 53, 69, 0.9);
+}
+
+@keyframes toast-in {
+  from {
+    opacity: 0;
+    transform: translate(-50%, -20px);
+  }
+  to {
+    opacity: 1;
+    transform: translate(-50%, 0);
+  }
+}
+
+/* 修改关注直播按钮样式以匹配抖音顶部导航栏 */
+.live-button {
+  display: flex;
+  align-items: center;
+  padding: 6px 8px;
+  cursor: pointer;
+  transition: background-color 0.3s;
+  margin-right: 8px;
+  border-radius: 4px;
+}
+
+.live-button:hover {
+  background: rgba(22, 24, 35, 0.03);
+}
+
+.live-button .nYbkS2o5 {
+  display: flex;
+  align-items: center;
+  margin-right: 4px;
+}
+
+.live-button .qnMXfrje {
+  font-size: 22px;
+  color: currentColor;
+}
+
+.live-button .jenVD1aU {
+  font-size: 14px;
+  color: rgba(22, 24, 35, 0.9);
+  margin: 0;
+}
+
+.dy-loading {
+  animation: loading-fade-in 0.3s ease;
+}
+
+@keyframes loading-fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.dy-loading svg {
+  width: 100%;
+  height: 100%;
+  opacity: 0.8;
+}
+
+/* 关注直播菜单图标：浅色模式黑色 */
+.tab-follow-live .follow-live-icon {
+  color: #161823;
+}
+
+/* 深色模式亮色 */
+html[dark="true"] .tab-follow-live .follow-live-icon {
+  color: #fff;
+}
+
+/* 右边距对齐抖音原始图标：原始规则是 .q9dD_Pwk { margin-right: 12px } */
+@media (min-width: 1240px) {
+  body[nav-fold=false] .tab-follow-live .follow-live-icon {
+    margin-right: 12px;
+  }
+}
+
+/* ── 音量控件组合（按钮 + 滑块） ── */
+.volume-group {
+  display: flex;
+  align-items: center;
+  background: rgba(255, 255, 255, 0.2);
+  border-radius: 4px;
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+  margin-right: 8px;
+  overflow: hidden;
+  transition: background 0.3s ease;
+}
+
+.volume-group:hover {
+  background: rgba(0, 0, 0, 0.6);
+}
+
+/* 滑块轨道 */
+.volume-slider {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 72px;
+  height: 4px;
+  background: rgba(255, 255, 255, 0.35);
+  border-radius: 2px;
+  outline: none;
+  cursor: pointer;
+  margin: 0 8px 0 2px;
+  transition: background 0.2s;
+}
+
+.volume-group:hover .volume-slider {
+  background: rgba(255, 255, 255, 0.55);
+}
+
+/* 滑块拖动点 */
+.volume-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 12px;
+  height: 12px;
+  background: #ffffff;
+  border-radius: 50%;
+  cursor: pointer;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
+  transition: transform 0.1s;
+}
+
+.volume-slider::-webkit-slider-thumb:hover {
+  transform: scale(1.25);
+}
+
+/* Firefox 兼容 */
+.volume-slider::-moz-range-thumb {
+  width: 12px;
+  height: 12px;
+  background: #ffffff;
+  border-radius: 50%;
+  border: none;
+  cursor: pointer;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
+}
+
+.volume-slider::-moz-range-track {
+  height: 4px;
+  background: rgba(255, 255, 255, 0.35);
+  border-radius: 2px;
+} 

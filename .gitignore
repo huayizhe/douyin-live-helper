@@ -1,0 +1,21 @@
+# 依赖（可由 npm install 重新生成）
+node_modules/
+
+# 敏感信息 —— 许可证私钥、环境变量，绝不可进版本库
+.env
+*.env
+server/.env
+
+# 运行时数据
+server/*.db
+server/*.db-shm
+server/*.db-wal
+*.log
+
+# 打包产物
+*.zip
+
+# 系统 / 编辑器
+.DS_Store
+Thumbs.db
+.claude/
