@@ -9,6 +9,7 @@ import { SpeechUtils } from './utils.js';
 import { PreloadManager } from './preload.js';
 import { FavoriteManager } from './favorite.js';
 import { SettingsManager } from './settings.js';
+import { LicenseManager } from './license.js';
 
 // 初始化语音合成
 SpeechUtils.init();
@@ -37,7 +38,7 @@ class DouyinLivePlugin {
     try {
         Logger.log('开始加载插件');
         // 从 chrome.storage.sync 加载特别关心缓存 + 全局设置（同时处理旧 localStorage 数据迁移）
-        await Promise.all([FavoriteManager.init(), SettingsManager.init()]);
+        await Promise.all([FavoriteManager.init(), SettingsManager.init(), LicenseManager.init()]);
         const plugin = new DouyinLivePlugin();
         plugin.init();
     } catch (error) {

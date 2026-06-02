@@ -10,6 +10,7 @@ import { ResourceMonitor } from './monitor.js';
 import { PreviewManager } from './preview.js';
 import { SettingsManager } from './settings.js';
 import { ToastManager } from './toast.js';
+import { LicenseManager } from './license.js';
 
 const ModalUI = {
     /**
@@ -186,6 +187,7 @@ const ModalUI = {
         const clearCompareButton = this.createClearCompareButton(isDarkMode); // 清除已选
         const scrollTopButton = this.createScrollTopButton(isDarkMode);    // 回到顶部按钮
         const resourceButton = this.createResourceButton(isDarkMode);     // 资源按钮
+        const licenseBtn = LicenseManager.createLicenseBtn(isDarkMode);  // PRO 授权按钮
         const liveCount = this.createLiveCountElement(isDarkMode);   // 直播数量显示
         const closeButton = this.createCloseButton(isDarkMode);      // 关闭按钮
 
@@ -199,7 +201,8 @@ const ModalUI = {
         leftGroup.appendChild(clearCompareButton); // 7. 清除已选
         leftGroup.appendChild(scrollTopButton);// 8. 回到顶部按钮
         leftGroup.appendChild(resourceButton); // 9. 资源按钮
-        leftGroup.appendChild(liveCount);      // 10. 直播数量显示
+        leftGroup.appendChild(licenseBtn);     // 10. PRO 授权按钮
+        leftGroup.appendChild(liveCount);      // 11. 直播数量显示
 
         // 组装页眉
         header.appendChild(leftGroup);         // 左侧按钮组
@@ -876,6 +879,10 @@ const ModalUI = {
 
         btn.addEventListener('click', () => {
             if (this._compareList.length < 2) return;
+            if (!LicenseManager.isPro) {
+                LicenseManager.showUpgradePrompt('多路对比预览');
+                return;
+            }
             PreviewManager.openComparePreview([...this._compareList]);
         });
 

@@ -9,6 +9,7 @@ import { StyleUtils, SpeechUtils, NetworkUtils, TextUtils } from './utils.js';
 import { ToastManager } from './toast.js';
 import { TOAST } from './constants.js';
 import { SettingsManager } from './settings.js';
+import { LicenseManager } from './license.js';
 
 // 确保 HLS.js 可用
 const HLS = window.Hls;
@@ -2052,8 +2053,9 @@ wow，好热闹;
         `;
         
         etmosphereEntryConfigBtn.onclick = (e) => {
-                e.stopPropagation();
+            e.stopPropagation();
             e.preventDefault();
+            if (!LicenseManager.isPro) { LicenseManager.showUpgradePrompt('TTS 氛围词条'); return; }
             this.showEtmosphereEntryConfigDialog(this.currentLive);
         };
 
@@ -2089,6 +2091,7 @@ wow，好热闹;
         }
         
         etmosphereEntryToggleBtn.onclick = () => {
+            if (!LicenseManager.isPro) { LicenseManager.showUpgradePrompt('TTS 氛围词条'); return; }
             isEnabled = !isEnabled;
             // 保存状态
             localStorage.setItem(`etmosphereEntryEnabled_${this.currentLive.secUid}`, isEnabled);
@@ -2212,6 +2215,10 @@ wow，好热闹;
         // 添加录制按钮点击事件
         recordBtn.onclick = async (e) => {
             e.stopPropagation();
+            if (!this.isRecording && !LicenseManager.isPro) {
+                LicenseManager.showUpgradePrompt('直播录制');
+                return;
+            }
             if (!this.isRecording) {
                 try {
                     // 获取视频元素的媒体流

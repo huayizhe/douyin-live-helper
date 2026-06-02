@@ -357,4 +357,323 @@ html[dark="true"] .tab-follow-live .follow-live-icon {
   height: 4px;
   background: rgba(255, 255, 255, 0.35);
   border-radius: 2px;
-} 
+}
+
+/* ══════════ PRO 授权系统 UI ══════════ */
+
+/* 标题栏 PRO 按钮 */
+.dylh-lic-btn {
+  display: flex;
+  align-items: center;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.dylh-lic-badge-pro,
+.dylh-lic-badge-free {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 10px;
+  border-radius: 5px;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.3px;
+  white-space: nowrap;
+  user-select: none;
+  transition: filter 0.2s, background 0.2s;
+}
+
+.dylh-lic-badge-pro {
+  background: linear-gradient(135deg, #f7c948 0%, #e8a020 100%);
+  color: #1a1a1a;
+  box-shadow: 0 1px 5px rgba(232, 160, 32, 0.45);
+}
+.dylh-lic-badge-pro:hover { filter: brightness(1.05); }
+
+.dylh-lic-badge-free {
+  border: 1px solid rgba(247, 201, 72, 0.7);
+  color: #e8a020;
+  background: rgba(247, 201, 72, 0.1);
+}
+.dylh-lic-badge-free:hover { background: rgba(247, 201, 72, 0.2); }
+
+/* 遮罩 */
+.dylh-dialog-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 100000;
+  background: rgba(0, 0, 0, 0.66);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  backdrop-filter: blur(3px);
+  -webkit-backdrop-filter: blur(3px);
+  animation: dylh-fade 0.18s ease;
+}
+@keyframes dylh-fade { from { opacity: 0; } to { opacity: 1; } }
+
+/* 对话框 */
+.dylh-dialog-box {
+  position: relative;
+  background: #1e1e2a;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 14px;
+  padding: 30px 34px 26px;
+  width: 420px;
+  max-width: 92vw;
+  max-height: 90vh;
+  overflow-y: auto;
+  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.6);
+  color: #e8e8f0;
+  animation: dylh-slide 0.22s ease;
+}
+.dylh-box-wide { width: 640px; }
+@keyframes dylh-slide {
+  from { transform: translateY(-12px); opacity: 0; }
+  to   { transform: translateY(0); opacity: 1; }
+}
+
+.dylh-dialog-close {
+  position: absolute;
+  top: 14px;
+  right: 16px;
+  width: 28px;
+  height: 28px;
+  border: none;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.5);
+  font-size: 22px;
+  line-height: 1;
+  cursor: pointer;
+  border-radius: 6px;
+}
+.dylh-dialog-close:hover { background: rgba(255, 255, 255, 0.1); color: #fff; }
+
+.dylh-dialog-pro-badge {
+  display: inline-block;
+  padding: 3px 11px;
+  border-radius: 5px;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 1.5px;
+  background: linear-gradient(135deg, #f7c948 0%, #e8a020 100%);
+  color: #1a1a1a;
+  margin-bottom: 14px;
+}
+
+.dylh-dialog-title {
+  font-size: 18px;
+  font-weight: 700;
+  color: #fff;
+  margin-bottom: 18px;
+  line-height: 1.4;
+}
+
+/* 权益对比 */
+.dylh-compare {
+  display: flex;
+  gap: 14px;
+  margin-bottom: 22px;
+}
+.dylh-compare-col {
+  flex: 1;
+  border-radius: 10px;
+  padding: 14px 16px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+}
+.dylh-col-free { background: rgba(255, 255, 255, 0.03); }
+.dylh-col-pro {
+  background: rgba(247, 201, 72, 0.07);
+  border-color: rgba(247, 201, 72, 0.35);
+}
+.dylh-compare-head {
+  font-size: 14px;
+  font-weight: 700;
+  color: #fff;
+  margin-bottom: 10px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+.dylh-col-pro .dylh-compare-head { color: #f7c948; }
+.dylh-col-pro-tag {
+  font-size: 11px;
+  font-weight: 500;
+  color: rgba(247, 201, 72, 0.7);
+  margin-left: 4px;
+}
+.dylh-compare-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.dylh-compare-list li {
+  position: relative;
+  padding: 5px 0 5px 20px;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: rgba(255, 255, 255, 0.78);
+}
+.dylh-compare-list li::before {
+  content: '✓';
+  position: absolute;
+  left: 0;
+  color: #5cc98a;
+  font-weight: 700;
+}
+.dylh-list-pro li::before { color: #f7c948; }
+
+/* 价格卡 */
+.dylh-pricing {
+  display: flex;
+  gap: 12px;
+  margin-bottom: 18px;
+}
+.dylh-price-card {
+  flex: 1;
+  position: relative;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  padding: 16px 10px 14px;
+  text-align: center;
+  background: rgba(255, 255, 255, 0.03);
+}
+.dylh-price-best {
+  border-color: #f7c948;
+  background: rgba(247, 201, 72, 0.08);
+}
+.dylh-price-flag {
+  position: absolute;
+  top: -10px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: linear-gradient(135deg, #f7c948 0%, #e8a020 100%);
+  color: #1a1a1a;
+  font-size: 10px;
+  font-weight: 800;
+  padding: 2px 10px;
+  border-radius: 8px;
+  white-space: nowrap;
+}
+.dylh-price-label {
+  font-size: 13px;
+  color: rgba(255, 255, 255, 0.7);
+  margin-bottom: 6px;
+}
+.dylh-price-num {
+  font-size: 22px;
+  font-weight: 800;
+  color: #fff;
+}
+.dylh-price-best .dylh-price-num { color: #f7c948; }
+.dylh-price-note {
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.45);
+  margin-top: 4px;
+}
+
+/* 激活输入行 */
+.dylh-dialog-input-row {
+  display: flex;
+  gap: 10px;
+  margin-bottom: 6px;
+}
+.dylh-dialog-input {
+  flex: 1;
+  padding: 10px 14px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  background: rgba(255, 255, 255, 0.07);
+  color: #fff;
+  font-size: 13px;
+  outline: none;
+  box-sizing: border-box;
+  transition: border-color 0.2s;
+}
+.dylh-dialog-input::placeholder { color: rgba(255, 255, 255, 0.3); }
+.dylh-dialog-input:focus { border-color: rgba(247, 201, 72, 0.55); }
+
+/* 按钮 */
+.dylh-dialog-btn-row { display: flex; gap: 10px; }
+.dylh-dialog-btn-primary {
+  padding: 10px 22px;
+  border-radius: 8px;
+  border: none;
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 600;
+  white-space: nowrap;
+  background: linear-gradient(135deg, #f7c948 0%, #e8a020 100%);
+  color: #1a1a1a;
+  transition: filter 0.2s;
+}
+.dylh-dialog-btn-primary:hover { filter: brightness(1.05); }
+.dylh-dialog-btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.dylh-dialog-btn-secondary {
+  flex: 1;
+  padding: 10px 20px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  cursor: pointer;
+  font-size: 14px;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.7);
+  transition: background 0.2s;
+}
+.dylh-dialog-btn-secondary:hover { background: rgba(255, 255, 255, 0.08); }
+
+.dylh-dialog-btn-danger {
+  flex: 1;
+  padding: 10px 0;
+  border-radius: 8px;
+  border: 1px solid rgba(220, 53, 69, 0.5);
+  cursor: pointer;
+  font-size: 14px;
+  background: transparent;
+  color: #e55;
+  transition: background 0.2s;
+}
+.dylh-dialog-btn-danger:hover { background: rgba(220, 53, 69, 0.12); }
+
+/* key-value（已激活） */
+.dylh-dialog-kv {
+  display: grid;
+  grid-template-columns: 3em 1fr;
+  row-gap: 9px;
+  column-gap: 12px;
+  font-size: 14px;
+}
+.dylh-kv-label { color: rgba(255, 255, 255, 0.45); font-size: 13px; }
+.dylh-kv-val { color: #e8e8f0; }
+
+/* 消息 / 提示 */
+.dylh-dialog-msg {
+  min-height: 18px;
+  font-size: 12.5px;
+  margin: 8px 0 0;
+  color: rgba(255, 255, 255, 0.5);
+  word-break: break-all;
+}
+.dylh-msg-success { color: #5cc98a !important; }
+.dylh-msg-error   { color: #e55 !important; }
+
+.dylh-dialog-hint {
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.4);
+  margin-top: 14px;
+  line-height: 1.6;
+}
+.dylh-dialog-hint b { color: rgba(255, 255, 255, 0.7); }
+.dylh-dialog-link { color: rgba(247, 201, 72, 0.8); text-decoration: none; }
+.dylh-dialog-link:hover { color: #f7c948; text-decoration: underline; }
+.dylh-dialog-linkbtn {
+  border: none;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.45);
+  font-size: 12px;
+  cursor: pointer;
+  padding: 0;
+  margin-left: 6px;
+  text-decoration: underline;
+}
+.dylh-dialog-linkbtn:hover { color: rgba(255, 255, 255, 0.75); }

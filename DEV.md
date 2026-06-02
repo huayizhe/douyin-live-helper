@@ -99,6 +99,7 @@ douyinfollowplugin/
 │   ├── preview.js      # 预览模块：悬浮预览、大屏预览、三联屏、多路对比、录制
 │   ├── favorite.js     # 特别关心模块（chrome.storage.sync + 内存缓存）
 │   ├── settings.js     # 全局设置模块：音量/声音总开关（chrome.storage.sync）
+│   ├── license.js      # PRO 授权：离线 ECDSA 验签、激活/解除、权益对比升级页
 │   ├── preload.js      # 预加载管理（按需）
 │   ├── monitor.js      # 资源监控模块
 │   ├── toast.js        # 轻提示模块
@@ -113,12 +114,42 @@ douyinfollowplugin/
 │   ├── icon16.png      # 16x16 图标，用于扩展图标
 │   ├── icon48.png      # 48x48 图标，用于扩展管理页
 │   └── icon128.png     # 128x128 图标，用于商店展示
+├── tools/              # 许可证签发工具
+│   ├── keygen-pair.js  # 生成 ECDSA 密钥对，自动写入公钥到 license.js
+│   ├── issue-license.js# 离线签发许可证（--plan/--days/--machine）
+│   └── private-key.json# 私钥（运行 keygen 后生成；.gitignore 忽略，勿外泄）
+├── docs/               # 运营/部署手册（收款发卡、服务器部署、插件配置测试）
+├── .gitignore          # Git 忽略（node_modules、私钥、.env 等）
 ├── manifest.json       # 扩展配置文件，定义权限和资源
 ├── rollup.config.js    # Rollup 构建配置，定义打包规则
 ├── package.json        # 项目配置文件，包含依赖和脚本
 ├── README.md           # 说明文档，包含安装和使用说明
 ├── CHANGELOG.md        # 更新日志
 └── DEV.md              # 开发文档，包含开发和构建说明
+
+## PRO 授权架构（阶段一：离线）
+
+采用 **ECDSA P-256（ES256）非对称签名**，离线验签，不依赖服务器。
+
+1. 原理
+   - 私钥签发、公钥验签：私钥只在你本地（`tools/private-key.json`），插件内置公钥（`license.js` 的 `_PK`）。
+   - 拿不到私钥就无法伪造有效许可证；改动许可证任意字节验签即失败。
+   - 许可证 payload：`{ p:套餐, e:到期时间戳, i:签发时间, m:机器标识(可选) }`，**不分功能档位**，月/年/买断仅 `e` 不同。
+
+2. 密钥与签发
+   - 初始化一次：`node tools/keygen-pair.js`（生成密钥对，公钥自动写入 `license.js`）。
+   - 收款后签发：`node tools/issue-license.js --plan=month|year|lifetime [--machine=<本机标识>] [--days=N]`。
+   - 把输出的许可证字符串发给买家，买家在插件「激活 PRO」框粘贴即可。
+
+3. 验签与功能锁
+   - 插件启动时 `LicenseManager.init()`（`content.js` 的 `Promise.all`）读取 `storage.local` 中的许可证并本地验签，决定 `isPro`。
+   - 功能锁点：`modal.js`（多路对比按钮）、`preview.js`（录制按钮、氛围词条配置/开关）。非 PRO 点击弹 `showUpgradePrompt()`。
+   - 免费保留：三联屏镜像、特别关心（无限）、资源监控。
+
+4. 改动须知
+   - 修改 `license.js` / `constants.js` 等源码后，必须 `npm run build` 才会进 `dist/`。
+   - 价格、客服微信、购买链接在 `constants.js` 的 `LICENSE` 常量配置。
+   - 阶段二（爱发电 Webhook 24 小时自动发卡）见 `docs/服务器部署手册.md`，届时新增 `server/` 并在 `manifest.json` 的 `host_permissions` 加服务器域名。
 
 ## 开发环境设置
 
@@ -175,6 +206,7 @@ douyinfollowplugin/
    - preview.js: 悬浮/大屏/三联屏/多路对比预览与录制
    - favorite.js: 特别关心存储（chrome.storage.sync）
    - settings.js: 音量/声音总开关存储（chrome.storage.sync）
+   - license.js: PRO 授权（离线 ECDSA 验签、激活/解除、权益对比升级页）
    - preload.js: 按需预加载管理
    - monitor.js: 资源监控
    - toast.js: 轻提示

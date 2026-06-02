@@ -158,6 +158,30 @@ export const LOG = {
 }; 
 
 /**
+ * 许可证 / PRO 相关常量
+ */
+export const LICENSE = {
+    // 客服微信号（半自动收款：用户付款后联系你领取密钥）
+    CONTACT_WECHAT: '你的微信号',
+
+    // 购买说明页（可选，留空则只显示微信）。阶段二可换成爱发电商品链接
+    BUY_URL: '',
+
+    // 阶段二：许可证服务器地址（阶段一离线，留空）
+    SERVER: '',
+
+    // 价格档位（仅用于权益对比页展示，真实金额以收款为准）
+    PRICING: {
+        month:    { label: '月付',     price: '¥12.9', note: '尝鲜，随时停' },
+        year:     { label: '年付',     price: '¥98',   note: '相当于 6.3 折', best: true },
+        lifetime: { label: '永久买断', price: '¥258',  note: '一次付清，终身更新' }
+    },
+
+    // 阶段二联网续期：Token 过期后断网宽限期（30 天）
+    GRACE_PERIOD: 30 * 24 * 3600 * 1000,
+};
+
+/**
  * Toast提示相关常量
  */
 export const TOAST = {

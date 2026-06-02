@@ -5,6 +5,7 @@ node_modules/
 .env
 *.env
 server/.env
+tools/private-key.json
 
 # 运行时数据
 server/*.db
