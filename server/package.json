@@ -1,0 +1,21 @@
+{
+  "name": "douyin-license-server",
+  "version": "1.0.0",
+  "description": "抖音关注直播助手 — 在线订阅许可证服务",
+  "private": true,
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js",
+    "dev": "node index.js"
+  },
+  "dependencies": {
+    "dotenv": "^16.4.5",
+    "express": "^4.19.2",
+    "qrcode": "^1.5.4"
+  },
+  "optionalDependencies": {
+    "alipay-sdk": "^4.13.0",
+    "better-sqlite3": "^11.3.0",
+    "wechatpay-node-v3": "^2.2.1"
+  }
+}

@@ -126,6 +126,59 @@ export const LicenseManager = {
         return mid;
     },
 
+    // ── 在线购买（需配置 LICENSE.SERVER）──
+
+    /** 创建订单 → { orderId, qrDataUrl, amount, plan } */
+    async createOrder(plan) {
+        const mid = await this.getMachineId();
+        const resp = await fetch(`${LICENSE.SERVER}/api/order/create`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ plan, machineId: mid }),
+        });
+        const body = await resp.json().catch(() => ({}));
+        if (!resp.ok) throw new Error(body.error || '下单失败，请稍后重试');
+        return body;
+    },
+
+    _pollTimer: null,
+    /** 轮询订单状态，支付成功自动激活；最多 5 分钟 */
+    pollOrder(orderId, onResult) {
+        const deadline = Date.now() + 5 * 60 * 1000;
+        const tick = async () => {
+            if (Date.now() > deadline) { onResult({ timeout: true }); return; }
+            try {
+                const resp = await fetch(`${LICENSE.SERVER}/api/order/status?orderId=${encodeURIComponent(orderId)}`);
+                const body = await resp.json().catch(() => ({}));
+                if (body.status === 'paid' && body.license) {
+                    await this.activate(body.license);
+                    onResult({ paid: true });
+                    return;
+                }
+            } catch { /* 网络抖动，继续轮询 */ }
+            this._pollTimer = setTimeout(tick, 2500);
+        };
+        tick();
+    },
+
+    stopPoll() {
+        if (this._pollTimer) { clearTimeout(this._pollTimer); this._pollTimer = null; }
+    },
+
+    /** 换绑到本设备：用旧许可证向服务器换发绑定本机的新许可证 */
+    async rebindToThisDevice(oldLicense) {
+        const mid = await this.getMachineId();
+        const resp = await fetch(`${LICENSE.SERVER}/api/rebind`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ license: oldLicense, newMachineId: mid }),
+        });
+        const body = await resp.json().catch(() => ({}));
+        if (!resp.ok) throw new Error(body.error || '换绑失败');
+        await this.activate(body.license);
+        return body;
+    },
+
     // ── UI ──
 
     /**
@@ -158,8 +211,12 @@ export const LicenseManager = {
 
     _refreshLicBtn(btn) {
         if (this.isPro) {
-            btn.setAttribute('title', 'PRO 已激活 — 点击管理授权');
-            btn.innerHTML = `<span class="dylh-lic-badge-pro">✓ PRO</span>`;
+            const days = this.expiresAt ? Math.ceil((this.expiresAt - Date.now()) / 86400000) : null;
+            const soon = days !== null && this.plan !== 'lifetime' && days <= 7;
+            btn.setAttribute('title', soon ? `PRO 将在 ${days} 天后到期，点击续费` : 'PRO 已激活 — 点击管理授权');
+            btn.innerHTML = soon
+                ? `<span class="dylh-lic-badge-pro dylh-badge-soon">PRO · 剩${days}天</span>`
+                : `<span class="dylh-lic-badge-pro">✓ PRO</span>`;
         } else {
             btn.setAttribute('title', '点击激活 PRO 授权');
             btn.innerHTML = `<span class="dylh-lic-badge-free">激活 PRO</span>`;
@@ -186,28 +243,45 @@ export const LicenseManager = {
         overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
     },
 
-    /** 升级页 HTML（含权益对比表 + 价格卡 + 激活框）*/
+    /** 升级页 HTML（权益对比 + 套餐选择/扫码购买 + 手动激活兜底）*/
     _upgradeHTML(featureName) {
         const tip = featureName
             ? `<div class="dylh-dialog-title">🔒 「${featureName}」是 PRO 专属功能</div>`
             : `<div class="dylh-dialog-title">解锁 PRO，看播更强大</div>`;
+        const hasServer = !!LICENSE.SERVER;
+        const buyArea = hasServer
+            ? `<button id="dylh-buy-btn" class="dylh-dialog-btn-primary dylh-btn-block">立即开通</button>`
+            : `<div class="dylh-dialog-hint">在线购买暂未开通，请联系微信 <b>${LICENSE.CONTACT_WECHAT}</b> 获取激活码${LICENSE.BUY_URL ? ` · 或前往 <a href="${LICENSE.BUY_URL}" target="_blank" class="dylh-dialog-link">购买页</a>` : ''}</div>`;
         return `
             <div class="dylh-dialog-box dylh-box-wide">
                 <div class="dylh-dialog-pro-badge">PRO</div>
                 ${tip}
                 ${this._benefitTableHTML()}
-                ${this._pricingHTML()}
-                <div class="dylh-dialog-input-row">
-                    <input id="dylh-lic-input" class="dylh-dialog-input" type="text"
-                        placeholder="已购买？在此粘贴许可证密钥激活" spellcheck="false" autocomplete="off" />
-                    <button id="dylh-activate-btn" class="dylh-dialog-btn-primary">激活</button>
+                <div id="dylh-buy-view">
+                    ${this._pricingHTML()}
+                    ${buyArea}
+                    <div class="dylh-activate-fold">
+                        <details>
+                            <summary>已有激活码？点此手动激活</summary>
+                            <div class="dylh-dialog-input-row" style="margin-top:10px">
+                                <input id="dylh-lic-input" class="dylh-dialog-input" type="text"
+                                    placeholder="粘贴许可证密钥" spellcheck="false" autocomplete="off" />
+                                <button id="dylh-activate-btn" class="dylh-dialog-btn-primary">激活</button>
+                            </div>
+                            <button id="dylh-show-mid" class="dylh-dialog-linkbtn">查看本机标识（换绑/绑定用）</button>
+                        </details>
+                    </div>
+                </div>
+                <div id="dylh-qr-view" style="display:none">
+                    <div class="dylh-qr-wrap">
+                        <img id="dylh-qr-img" class="dylh-qr-img" alt="支付二维码" />
+                        <div class="dylh-qr-amount" id="dylh-qr-amount"></div>
+                        <div class="dylh-qr-tip">请用微信 / 支付宝扫码支付<br>支付成功后<b>自动开通</b>，无需任何手动操作</div>
+                        <div id="dylh-qr-status" class="dylh-qr-status">等待支付中…</div>
+                        <button id="dylh-qr-cancel" class="dylh-dialog-btn-secondary">取消</button>
+                    </div>
                 </div>
                 <div id="dylh-msg" class="dylh-dialog-msg"></div>
-                <div class="dylh-dialog-hint">
-                    购买请联系微信 <b>${LICENSE.CONTACT_WECHAT}</b>
-                    ${LICENSE.BUY_URL ? `· 或前往 <a href="${LICENSE.BUY_URL}" target="_blank" class="dylh-dialog-link">购买页</a>` : ''}
-                    <button id="dylh-show-mid" class="dylh-dialog-linkbtn">查看本机标识</button>
-                </div>
                 <button id="dylh-close-btn" class="dylh-dialog-close">×</button>
             </div>
         `;
@@ -229,11 +303,12 @@ export const LicenseManager = {
                     <span class="dylh-kv-label">到期</span><span class="dylh-kv-val">${expStr}</span>
                 </div>
                 <div class="dylh-dialog-btn-row" style="margin-top:20px">
+                    ${this.plan !== 'lifetime' ? `<button id="dylh-renew-btn" class="dylh-dialog-btn-primary">立即续费</button>` : ''}
                     <button id="dylh-deactivate-btn" class="dylh-dialog-btn-danger">解除本设备激活</button>
                     <button id="dylh-close-btn2" class="dylh-dialog-btn-secondary">关闭</button>
                 </div>
                 <div id="dylh-msg" class="dylh-dialog-msg"></div>
-                <div class="dylh-dialog-hint">解除后可在其他设备重新激活同一密钥</div>
+                <div class="dylh-dialog-hint">换新设备？在新设备「激活 PRO」里粘贴本授权即可自动换绑</div>
                 <button id="dylh-close-btn" class="dylh-dialog-close">×</button>
             </div>
         `;
@@ -274,14 +349,15 @@ export const LicenseManager = {
         `;
     },
 
-    /** 三档价格卡 */
+    /** 三档价格卡（可点击单选，默认年付高亮） */
     _pricingHTML() {
         const P = LICENSE.PRICING;
         const card = (k) => {
             const it = P[k];
             return `
-                <div class="dylh-price-card${it.best ? ' dylh-price-best' : ''}">
+                <div class="dylh-price-card${it.best ? ' dylh-price-best dylh-price-selected' : ''}" data-plan="${k}">
                     ${it.best ? '<div class="dylh-price-flag">最划算</div>' : ''}
+                    <div class="dylh-price-check">✓</div>
                     <div class="dylh-price-label">${it.label}</div>
                     <div class="dylh-price-num">${it.price}</div>
                     <div class="dylh-price-note">${it.note}</div>
@@ -292,7 +368,7 @@ export const LicenseManager = {
 
     /** 绑定对话框内的按钮事件 */
     _bindDialog(overlay) {
-        const close = () => overlay.remove();
+        const close = () => { this.stopPoll(); overlay.remove(); };
         overlay.querySelector('#dylh-close-btn')?.addEventListener('click', close);
         overlay.querySelector('#dylh-close-btn2')?.addEventListener('click', close);
 
@@ -302,8 +378,57 @@ export const LicenseManager = {
             msgEl.textContent = t;
             msgEl.className = `dylh-dialog-msg${type ? ' dylh-msg-' + type : ''}`;
         };
+        const refreshBadges = () => document.querySelectorAll('.dylh-lic-btn').forEach(b => this._refreshLicBtn(b));
 
-        // 激活
+        // ── 套餐单选（默认年付高亮）──
+        let selectedPlan = 'year';
+        const cards = overlay.querySelectorAll('.dylh-price-card');
+        cards.forEach(c => c.addEventListener('click', () => {
+            cards.forEach(x => x.classList.remove('dylh-price-selected'));
+            c.classList.add('dylh-price-selected');
+            selectedPlan = c.getAttribute('data-plan');
+        }));
+
+        // ── 立即开通：下单 → 弹码 → 轮询自动激活 ──
+        const buyBtn = overlay.querySelector('#dylh-buy-btn');
+        buyBtn?.addEventListener('click', async () => {
+            buyBtn.disabled = true;
+            buyBtn.textContent = '生成支付码…';
+            try {
+                const order = await this.createOrder(selectedPlan);
+                overlay.querySelector('#dylh-buy-view').style.display = 'none';
+                const qrView = overlay.querySelector('#dylh-qr-view');
+                qrView.style.display = 'block';
+                overlay.querySelector('#dylh-qr-img').src = order.qrDataUrl;
+                overlay.querySelector('#dylh-qr-amount').textContent = '¥' + (order.amount / 100).toFixed(2);
+                const statusEl = overlay.querySelector('#dylh-qr-status');
+                this.pollOrder(order.orderId, (r) => {
+                    if (r.paid) {
+                        statusEl.textContent = '✓ 支付成功，已开通 PRO！';
+                        statusEl.className = 'dylh-qr-status dylh-msg-success';
+                        refreshBadges();
+                        setTimeout(close, 1600);
+                    } else if (r.timeout) {
+                        statusEl.textContent = '支付超时，请重试';
+                        statusEl.className = 'dylh-qr-status dylh-msg-error';
+                    }
+                });
+            } catch (err) {
+                setMsg('✗ ' + err.message, 'error');
+                buyBtn.disabled = false;
+                buyBtn.textContent = '立即开通';
+            }
+        });
+
+        // 取消支付 → 回到套餐视图
+        overlay.querySelector('#dylh-qr-cancel')?.addEventListener('click', () => {
+            this.stopPoll();
+            overlay.querySelector('#dylh-qr-view').style.display = 'none';
+            overlay.querySelector('#dylh-buy-view').style.display = 'block';
+            if (buyBtn) { buyBtn.disabled = false; buyBtn.textContent = '立即开通'; }
+        });
+
+        // ── 手动激活（兜底）；换设备时自动尝试换绑到本机 ──
         const activateBtn = overlay.querySelector('#dylh-activate-btn');
         const input = overlay.querySelector('#dylh-lic-input');
         const doActivate = async () => {
@@ -314,9 +439,24 @@ export const LicenseManager = {
             try {
                 await this.activate(v);
                 setMsg('✓ 激活成功！PRO 功能已全部解锁', 'success');
-                document.querySelectorAll('.dylh-lic-btn').forEach(b => this._refreshLicBtn(b));
+                refreshBadges();
                 setTimeout(close, 1400);
             } catch (err) {
+                // 可能是换了设备（机器不符）。服务器可用时尝试自动换绑到本机
+                if (LICENSE.SERVER) {
+                    try {
+                        await this.rebindToThisDevice(v);
+                        setMsg('✓ 已换绑到本设备并激活！', 'success');
+                        refreshBadges();
+                        setTimeout(close, 1400);
+                        return;
+                    } catch (e2) {
+                        setMsg('✗ ' + e2.message, 'error');
+                        activateBtn.disabled = false;
+                        activateBtn.textContent = '激活';
+                        return;
+                    }
+                }
                 setMsg('✗ ' + err.message, 'error');
                 activateBtn.disabled = false;
                 activateBtn.textContent = '激活';
@@ -325,19 +465,26 @@ export const LicenseManager = {
         activateBtn?.addEventListener('click', doActivate);
         input?.addEventListener('keydown', (e) => { if (e.key === 'Enter') doActivate(); });
 
-        // 查看本机标识（机器绑定模式下发给店主）
-        overlay.querySelector('#dylh-show-mid')?.addEventListener('click', async () => {
+        // 查看本机标识
+        overlay.querySelector('#dylh-show-mid')?.addEventListener('click', async (e) => {
+            e.preventDefault();
             const mid = await this.getMachineId();
-            setMsg('本机标识：' + mid + '（已复制，可发给店主绑定）', 'success');
+            setMsg('本机标识：' + mid + '（已复制）', 'success');
             try { await navigator.clipboard.writeText(mid); } catch {}
         });
 
-        // 解除激活
+        // 续费（状态弹窗）→ 打开购买
+        overlay.querySelector('#dylh-renew-btn')?.addEventListener('click', () => {
+            close();
+            this.showUpgradePrompt();
+        });
+
+        // 解除激活（状态弹窗）
         overlay.querySelector('#dylh-deactivate-btn')?.addEventListener('click', async () => {
-            if (!confirm('确认解除本设备激活？解除后 PRO 功能将不可用（密钥可在其他设备重新激活）')) return;
+            if (!confirm('确认解除本设备激活？解除后 PRO 功能将不可用（可在其他设备重新激活/换绑）')) return;
             await this.deactivate();
             close();
-            document.querySelectorAll('.dylh-lic-btn').forEach(b => this._refreshLicBtn(b));
+            refreshBadges();
         });
     }
 };

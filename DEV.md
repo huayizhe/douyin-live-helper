@@ -149,7 +149,7 @@ douyinfollowplugin/
 4. 改动须知
    - 修改 `license.js` / `constants.js` 等源码后，必须 `npm run build` 才会进 `dist/`。
    - 价格、客服微信、购买链接在 `constants.js` 的 `LICENSE` 常量配置。
-   - 阶段二（爱发电 Webhook 24 小时自动发卡）见 `docs/服务器部署手册.md`，届时新增 `server/` 并在 `manifest.json` 的 `host_permissions` 加服务器域名。
+   - **在线订阅支付**：`server/`（Node+Express）下单 → 弹二维码 → 支付回调/轮询 → 用同一私钥签发授权 → 插件自动激活。支付层适配器 `server/pay/{alipay,wechat,mock}.js`，加/换渠道不动业务。插件端 `license.js` 的 `createOrder/pollOrder/rebindToThisDevice` 对接；配置 `constants.js` 的 `SERVER` 与 `manifest.json` 域名。详见 `docs/服务器部署手册.md`。
 
 ## 开发环境设置
 

@@ -11,6 +11,7 @@ tools/private-key.json
 server/*.db
 server/*.db-shm
 server/*.db-wal
+server/orders.json
 *.log
 
 # 打包产物

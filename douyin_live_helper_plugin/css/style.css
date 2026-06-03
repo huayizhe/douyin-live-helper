@@ -677,3 +677,89 @@ html[dark="true"] .tab-follow-live .follow-live-icon {
   text-decoration: underline;
 }
 .dylh-dialog-linkbtn:hover { color: rgba(255, 255, 255, 0.75); }
+
+/* ── 套餐卡可点击单选 ── */
+.dylh-price-card { cursor: pointer; user-select: none; }
+.dylh-price-check {
+  position: absolute;
+  top: 8px; right: 8px;
+  width: 18px; height: 18px;
+  border-radius: 50%;
+  background: #f7c948;
+  color: #1a1a1a;
+  font-size: 12px; font-weight: 800;
+  line-height: 18px; text-align: center;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+.dylh-price-card.dylh-price-selected {
+  border-color: #f7c948;
+  box-shadow: 0 0 0 2px rgba(247, 201, 72, 0.5);
+  background: rgba(247, 201, 72, 0.12);
+}
+.dylh-price-card.dylh-price-selected .dylh-price-check { opacity: 1; }
+
+/* 整宽主按钮 */
+.dylh-btn-block {
+  display: block;
+  width: 100%;
+  margin: 4px 0 6px;
+  padding: 12px 0;
+  font-size: 15px;
+}
+
+/* 手动激活折叠 */
+.dylh-activate-fold { margin-top: 10px; }
+.dylh-activate-fold summary {
+  cursor: pointer;
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.45);
+  list-style: none;
+}
+.dylh-activate-fold summary:hover { color: rgba(255, 255, 255, 0.75); }
+.dylh-activate-fold summary::-webkit-details-marker { display: none; }
+
+/* ── 二维码支付视图 ── */
+.dylh-qr-wrap {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 10px 0 4px;
+}
+.dylh-qr-img {
+  width: 220px; height: 220px;
+  border-radius: 10px;
+  background: #fff;
+  padding: 8px;
+  box-sizing: border-box;
+}
+.dylh-qr-amount {
+  font-size: 26px; font-weight: 800;
+  color: #f7c948;
+  margin: 14px 0 6px;
+}
+.dylh-qr-tip {
+  font-size: 13px;
+  color: rgba(255, 255, 255, 0.6);
+  text-align: center;
+  line-height: 1.6;
+}
+.dylh-qr-tip b { color: #fff; }
+.dylh-qr-status {
+  font-size: 14px;
+  color: rgba(255, 255, 255, 0.75);
+  margin: 14px 0;
+  min-height: 20px;
+}
+.dylh-qr-wrap .dylh-dialog-btn-secondary { width: 140px; flex: none; }
+
+/* 即将到期徽章 */
+.dylh-badge-soon {
+  background: linear-gradient(135deg, #ff9d4d 0%, #f76b1c 100%) !important;
+  color: #fff !important;
+  animation: dylh-pulse 1.6s ease-in-out infinite;
+}
+@keyframes dylh-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.7; }
+}
