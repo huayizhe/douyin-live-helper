@@ -10,6 +10,7 @@ import { ToastManager } from './toast.js';
 import { TOAST } from './constants.js';
 import { SettingsManager } from './settings.js';
 import { LicenseManager } from './license.js';
+import { AtmosphereManager } from './atmosphere.js';
 
 // 确保 HLS.js 可用
 const HLS = window.Hls;
@@ -1918,8 +1919,7 @@ wow，好热闹;
 注：@会被替换为主播昵称或备注`;
 
         // 加载已保存的配置
-        const atmosphereEntryConfigKey = `etmosphereEntryConfig_${live.secUid}`;
-        const cachedEntryListStr = localStorage.getItem(atmosphereEntryConfigKey);
+        const cachedEntryListStr = AtmosphereManager.getEntries(live.secUid);
 
         if (cachedEntryListStr) {
             textarea.value = cachedEntryListStr;
@@ -1927,6 +1927,21 @@ wow，好热闹;
             // 如果没有保存的配置，使用默认词条
             textarea.value = this.currentEtmosphereEntryConfig.entryListStr;
         }
+
+        // 语音播报开关（静音法：关闭只是音量为 0，词条显示与节奏不变）
+        const voiceRow = document.createElement('label');
+        Object.assign(voiceRow.style, {
+            display: 'flex', alignItems: 'center', gap: '8px',
+            margin: '0 0 16px', cursor: 'pointer',
+            color: isDarkMode ? '#ddd' : '#333', fontSize: '14px'
+        });
+        const voiceCheckbox = document.createElement('input');
+        voiceCheckbox.type = 'checkbox';
+        voiceCheckbox.checked = AtmosphereManager.isVoice(live.secUid);
+        const voiceLabelText = document.createElement('span');
+        voiceLabelText.textContent = '语音播报（关闭后只显示词条、不出声）';
+        voiceRow.appendChild(voiceCheckbox);
+        voiceRow.appendChild(voiceLabelText);
 
         // 保存按钮
         const saveBtn = document.createElement('button');
@@ -1944,6 +1959,9 @@ wow，好热闹;
 
         // 保存事件
         saveBtn.onclick = () => {
+            // 语音播报开关：保存并立即应用静音状态
+            AtmosphereManager.setVoice(live.secUid, voiceCheckbox.checked);
+            SpeechUtils.setMuted(!voiceCheckbox.checked);
             const etmosphereEntryStr = textarea.value.trim();
             const previewContainer = document.getElementById(this.previewContainerId);
             if (etmosphereEntryStr) {
@@ -1960,8 +1978,7 @@ wow，好热闹;
                 // 更新配置
                 this.currentEtmosphereEntryConfig.currentEntryIndex = 0;
 
-                const atmosphereEntryConfigKey = `etmosphereEntryConfig_${live.secUid}`;
-                localStorage.setItem(atmosphereEntryConfigKey, etmosphereEntryStr);
+                AtmosphereManager.setEntries(live.secUid, etmosphereEntryStr);
                 
                 // 立即更新显示
                 this.updateEtmosphereEntryTexts(previewContainer, etmosphereEntryStr);
@@ -1969,8 +1986,7 @@ wow，好热闹;
                 etmosphereEntryConfigModal.remove();
             } else {
                 // 清空配置时使用默认词条
-                const atmosphereEntryConfigKey = `etmosphereEntryConfig_${live.secUid}`;
-                localStorage.removeItem(atmosphereEntryConfigKey);
+                AtmosphereManager.removeEntries(live.secUid);
                 this.updateEtmosphereEntryTexts(previewContainer, this.currentEtmosphereEntryConfig.entryListStr);
                 ToastManager.show('已清空自定义词条，将使用默认配置', TOAST.TYPE.INFO);
                 etmosphereEntryConfigModal.remove();
@@ -1980,6 +1996,7 @@ wow，好热闹;
         // 组装对话框
         titleBar.appendChild(title);
         dialog.appendChild(titleBar);
+        dialog.appendChild(voiceRow);
         dialog.appendChild(textarea);
         dialog.appendChild(saveBtn);
         etmosphereEntryConfigModal.appendChild(dialog);
@@ -2001,8 +2018,7 @@ wow，好热闹;
             // 如果点击的是模态框本身，且不是在编辑词条时
             if (e.target === etmosphereEntryConfigModal && !textarea.matches(':focus')) {
                 // 如果文本区域有未保存的更改，显示确认提示
-                const atmosphereEntryConfigKey = `etmosphereEntryConfig_${live.secUid}`;
-                const cachedEntryList = localStorage.getItem(atmosphereEntryConfigKey) || this.currentEtmosphereEntryConfig.entryListStr;
+                const cachedEntryList = AtmosphereManager.getEntries(live.secUid) || this.currentEtmosphereEntryConfig.entryListStr;
                 if (textarea.value !== cachedEntryList) {
                     if (confirm('有未保存的更改，确定要关闭吗？')) {
                         etmosphereEntryConfigModal.remove();
@@ -2018,8 +2034,7 @@ wow，好热闹;
             // 如果按下 ESC 键
             if (e.key === 'Escape') {
                 // 如果文本区域有未保存的更改，显示确认提示
-                const atmosphereEntryConfigKey = `etmosphereEntryConfig_${live.secUid}`;
-                const cachedEntryList = localStorage.getItem(atmosphereEntryConfigKey) || this.currentEtmosphereEntryConfig.entryListStr;
+                const cachedEntryList = AtmosphereManager.getEntries(live.secUid) || this.currentEtmosphereEntryConfig.entryListStr;
                 if (textarea.value !== cachedEntryList) {
                     if (confirm('有未保存的更改，确定要关闭吗？')) {
                         etmosphereEntryConfigModal.remove();
@@ -2082,8 +2097,7 @@ wow，好热闹;
         `;
 
         // 初始化词条配置
-        const atmosphereEntryConfigKey = `etmosphereEntryConfig_${this.currentLive.secUid}`;
-        const cachedEntryListStr = localStorage.getItem(atmosphereEntryConfigKey) || this.currentEtmosphereEntryConfig.entryListStr;
+        const cachedEntryListStr = AtmosphereManager.getEntries(this.currentLive.secUid) || this.currentEtmosphereEntryConfig.entryListStr;
 
         // 如果初始状态为开启，调用一次更新词条来初始化
         if (isEnabled && cachedEntryListStr.length > 0) {
@@ -2094,7 +2108,7 @@ wow，好热闹;
             if (!LicenseManager.isPro) { LicenseManager.showUpgradePrompt('TTS 氛围词条'); return; }
             isEnabled = !isEnabled;
             // 保存状态
-            localStorage.setItem(`etmosphereEntryEnabled_${this.currentLive.secUid}`, isEnabled);
+            AtmosphereManager.setDisplay(this.currentLive.secUid, isEnabled);
             
             // 更新图标颜色
             etmosphereEntryToggleBtn.querySelector('svg').style.stroke = isEnabled ? '#ff2c55' : '#fff';
@@ -2119,12 +2133,8 @@ wow，好热闹;
             // 如果开启，重新初始化词条配置
             if (isEnabled) {
                 Logger.log('重新初始化词条配置');
-                const atmosphereEntryConfigKey = `etmosphereEntryConfig_${this.currentLive.secUid}`;
-                const cachedEntryListStr = localStorage.getItem(atmosphereEntryConfigKey) || this.currentEtmosphereEntryConfig.entryListStr;
-                Logger.log('词条配置:', {
-                    atmosphereEntryConfigKey,
-                    cachedEntryListStr,
-                });
+                const cachedEntryListStr = AtmosphereManager.getEntries(this.currentLive.secUid) || this.currentEtmosphereEntryConfig.entryListStr;
+                Logger.log('词条配置:', { cachedEntryListStr });
                 this.updateEtmosphereEntryTexts(previewContainer, cachedEntryListStr);
             } else {
                 // 关闭词条时停止语音播放
@@ -2141,8 +2151,7 @@ wow，好热闹;
      * @returns {boolean} 氛围词条开启状态
      */
     getEtmosphereEntryEnabledState(secUid) {
-        const anchorKey = `etmosphereEntryEnabled_${secUid}`;
-        return localStorage.getItem(anchorKey) === null ? false : localStorage.getItem(anchorKey) === 'true';
+        return AtmosphereManager.isDisplay(secUid);
     },
 
     /**
@@ -2455,22 +2464,23 @@ wow，好热闹;
     createEtmosphereEntry(entry, pos, color, previewContainer) {
         const etmosphereEntry = document.createElement('div');
         etmosphereEntry.className = 'etmosphere-entry';
+        const rot = Math.random() * 30 - 15;
         Object.assign(etmosphereEntry.style, {
             position: 'absolute',
             color: color,
             fontSize: `${Math.random() * 16 + 24}px`, // 24-40px
-            transform: `rotate(${Math.random() * 30 - 15}deg)`,
             left: `${pos.left + (Math.random() * 5 * 2 - 5)}%`,
             top: `${pos.top + (Math.random() * 5 * 2 - 5)}%`,
             pointerEvents: 'none',
             textShadow: '2px 2px 4px rgba(0,0,0,0.8)',
             fontWeight: 'bold',
             whiteSpace: 'nowrap',
-            opacity: 0.6,
             zIndex: 1,
             letterSpacing: '1px',
-            transition: 'opacity 0.5s'
+            animationDelay: `${Math.random() * 1.2}s`,
         });
+        // 旋转角传给 CSS 动画（淡入 + 缓慢上浮，保持随机旋转）
+        etmosphereEntry.style.setProperty('--rot', `${rot}deg`);
         etmosphereEntry.textContent = entry;
         previewContainer.appendChild(etmosphereEntry);
     },
@@ -2506,6 +2516,8 @@ wow，好热闹;
      */
     createEtmosphereEntryAndPlayVoice(previewContainer, formattedEntryList) {
         Logger.log('createEtmosphereEntryAndPlayVoice', previewContainer, formattedEntryList);
+        // 同步语音播报开关（静音法）：关闭只是音量为 0，不影响词条显示与节奏
+        SpeechUtils.setMuted(!AtmosphereManager.isVoice(this.currentLive.secUid));
         // 清除现有的漂浮文字
         const existingTexts = previewContainer.querySelectorAll('.etmosphere-entry');
         existingTexts.forEach(text => text.remove());

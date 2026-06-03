@@ -265,6 +265,14 @@ const SpeechUtils = {
     },
 
     /**
+     * 设置静音（true=静音）。
+     * 词条仍按原有"语音回调驱动"逻辑播放（保证显示与节奏同步），静音只是音量为 0。
+     */
+    setMuted(muted) {
+        this.voiceMuted = !!muted;
+    },
+
+    /**
      * 初始化语音播报系统
      */
     init() {
@@ -458,6 +466,9 @@ const SpeechUtils = {
             const utterance = new SpeechSynthesisUtterance(text);
             Object.assign(utterance, this.voiceSettings);
             utterance.voice = this.selectedVoice;
+            // 语音播报开关（静音法）：静音时音量置 0，但仍正常播放并触发 onend，
+            // 不影响词条显示节奏与同步——只是听不见声音。
+            if (this.voiceMuted) utterance.volume = 0;
 
             // 绑定事件处理器
             const handlePlaybackEnd = () => {
