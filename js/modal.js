@@ -85,17 +85,17 @@ const ModalUI = {
         this.keydownHandler = (e) => {
             // ESC 键：先关「最上层」的浮层，再关列表（标准栈式关闭，体验统一不出错）
             if (e.key === 'Escape') {
-                // 大屏/对比预览/浏览器全屏：由它们自己的 ESC 处理，这里不插手
+                // 1) PRO 授权/会员信息弹窗（z-index 最高，叠在大屏之上时也要能关）
+                const proDialog = document.getElementById('dylh-overlay');
+                if (proDialog) { e.stopPropagation(); proDialog.remove(); return; }
+                // 2) 资源监控面板（叠在大屏之上时也要能关）
+                const resPanel = document.querySelector('.resource-monitor-panel');
+                if (resPanel && resPanel.style.display !== 'none') { e.stopPropagation(); ResourceMonitor.hidePanel(); return; }
+                // 3) 大屏/对比预览/浏览器全屏：由它们自己的 ESC 处理，这里不插手
                 if (document.getElementById('dy-modal') ||
                     document.getElementById('dy-compare-modal') ||
                     document.fullscreenElement) return;
-                // 1) PRO 授权弹窗（z-index 最高）
-                const proDialog = document.getElementById('dylh-overlay');
-                if (proDialog) { e.stopPropagation(); proDialog.remove(); return; }
-                // 2) 资源监控面板
-                const resPanel = document.querySelector('.resource-monitor-panel');
-                if (resPanel && resPanel.style.display !== 'none') { e.stopPropagation(); ResourceMonitor.hidePanel(); return; }
-                // 3) 否则关闭直播列表
+                // 4) 否则关闭直播列表
                 const modal = DOMUtils.findElement('.live-modal');
                 if (modal) {
                     this.enableDouyinShortcuts();
@@ -1028,17 +1028,11 @@ const ModalUI = {
     createCompareButton(isDarkMode) {
         const btn = DOMUtils.createElement('button', {
             className: 'compare-preview-button',
-            innerHTML: `
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                    <rect x="3" y="5" width="7" height="14" rx="1"/>
-                    <rect x="14" y="5" width="7" height="14" rx="1"/>
-                </svg>
-                <span style="margin-left:4px;">对比预览(0)</span>
-            `,
+            innerHTML: `<span>0 同时看</span>`,
             styles: {
                 display: 'flex',
                 alignItems: 'center',
-                padding: '6px 12px',
+                padding: '6px 14px',
                 border: `1px solid ${isDarkMode ? '#3f3f3f' : '#ddd'}`,
                 borderRadius: '4px',
                 background: 'transparent',
@@ -1047,7 +1041,8 @@ const ModalUI = {
                 fontSize: '14px',
                 opacity: '0.5',
                 transition: 'opacity 0.2s, color 0.2s',
-                justifyContent: 'center'
+                justifyContent: 'center',
+                whiteSpace: 'nowrap'
             }
         });
         btn.setAttribute('title', '勾选 2-3 个直播间后点击，同屏对比');
@@ -1112,7 +1107,7 @@ const ModalUI = {
         if (!btn) return;
         const n = this._compareList.length;
         const span = btn.querySelector('span');
-        if (span) span.textContent = `对比预览(${n})`;
+        if (span) span.textContent = `${n} 同时看`;
         const enabled = n >= 2;
         btn.style.opacity = enabled ? '1' : '0.5';
         btn.style.cursor = enabled ? 'pointer' : 'not-allowed';

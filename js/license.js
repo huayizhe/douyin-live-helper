@@ -116,12 +116,40 @@ export const LicenseManager = {
         this._payload = null;
     },
 
-    /** 获取/生成稳定机器标识（也作为绑定取件码） */
+    /**
+     * 由稳定的浏览器/硬件信号确定性派生设备指纹（SHA-256 取前 32 位 hex）。
+     * 不依赖任何随机数与持久化，故卸载重装后能再次算出**同一个**值。
+     */
+    async _computeFingerprint() {
+        const n = navigator || {};
+        const s = (typeof window !== 'undefined' && window.screen) || {};
+        let tz = '';
+        try { tz = Intl.DateTimeFormat().resolvedOptions().timeZone || ''; } catch (_) {}
+        const parts = [
+            n.platform || '',
+            n.hardwareConcurrency || '',
+            n.deviceMemory || '',
+            (s.width || '') + 'x' + (s.height || '') + 'x' + (s.colorDepth || ''),
+            n.language || '',
+            tz,
+            n.maxTouchPoints || ''
+        ].join('|');
+        const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(parts));
+        const hex = Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, '0')).join('');
+        return 'fp-' + hex.slice(0, 32);
+    },
+
+    /**
+     * 获取/生成稳定机器标识（也作为绑定取件码）。
+     * 先读 local 缓存（reload 快路径）；缺失时由设备指纹**确定性派生**（而非随机），
+     * 故卸载重装后能再次算出同一标识 → 旧激活码继续匹配，重新粘贴即可激活。
+     */
     async getMachineId() {
         const got = await chrome.storage.local.get(_MID_KEY);
         if (got[_MID_KEY]) return got[_MID_KEY];
-        const mid = (crypto.randomUUID && crypto.randomUUID()) ||
-            (Date.now() + '-' + Math.random().toString(16).slice(2));
+        let mid;
+        try { mid = await this._computeFingerprint(); }
+        catch (_) { mid = 'rnd-' + Date.now() + '-' + Math.random().toString(16).slice(2); }
         await chrome.storage.local.set({ [_MID_KEY]: mid });
         return mid;
     },

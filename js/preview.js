@@ -643,105 +643,92 @@ wow，好热闹;
     },
 
     /**
-     * 大屏渐进升清：后台用临时 video 预拉蓝光，就绪后无缝替换到同一个 videos[0]（不换 DOM 元素）。
-     * 三联屏/对比已加视频（videos 增多）则跳过，保活 captureStream 镜像。全程 best-effort，失败则维持低清。
+     * 大屏切换清晰度：后台用临时 video 预拉新清晰度，出画面后**继续播放 1.5 秒再硬切**到新流
+     * （不做透明度/音量渐变，简单稳定）。三联屏/录制中跳过。全程 best-effort，失败则维持原清晰度。
      * @param {HTMLVideoElement[]} videos - 大屏视频数组（videos[0] 为主画面）
-     * @param {string} highUrl - 蓝光流地址
-     * @param {HTMLElement} previewContainer - 稳定全屏容器（冻结帧遮罩挂这里）
+     * @param {string} newUrl - 目标清晰度流地址
+     * @param {HTMLElement} previewContainer - 大屏容器
      */
-    _crossfadeBigScreenQuality(videos, highUrl, previewContainer) {
+    _switchBigScreenQuality(videos, newUrl, previewContainer) {
         const v0 = videos[0];
         if (!v0 || !window.Hls) return;
         if (this.isRecording || videos.length !== 1) return; // 录制中/三联屏不切换
 
-        let highHls;
-        try { highHls = new Hls({ enableWorker: true, lowLatencyMode: true, backBufferLength: 0 }); }
+        let newHls;
+        try { newHls = new Hls({ enableWorker: true, lowLatencyMode: true, backBufferLength: 0 }); }
         catch (_) { return; }
-        this.fullPreviewHlsInstances.push(highHls);
-        const drop = () => { this.fullPreviewHlsInstances = this.fullPreviewHlsInstances.filter(h => h !== highHls); };
+        this.fullPreviewHlsInstances.push(newHls);
+        const drop = () => { this.fullPreviewHlsInstances = this.fullPreviewHlsInstances.filter(h => h !== newHls); };
 
-        // 蓝光在独立可见视频上预缓冲，叠在 v0 上、初始透明
+        // 新清晰度在隐藏的临时 video 上预缓冲，叠在 v0 上（visibility:hidden，不抢画面）
         const vc0 = v0.parentElement;
-        const vHigh = document.createElement('video');
-        vHigh.muted = true; vHigh.playsInline = true; vHigh.autoplay = true;
-        vHigh.disablePictureInPicture = true;
-        vHigh.oncontextmenu = (e) => e.preventDefault();
-        Object.assign(vHigh.style, {
+        const vNew = document.createElement('video');
+        vNew.muted = true; vNew.playsInline = true; vNew.autoplay = true;
+        vNew.disablePictureInPicture = true;
+        vNew.oncontextmenu = (e) => e.preventDefault();
+        Object.assign(vNew.style, {
             position: 'absolute', top: '0', left: '0', width: '100%', height: '100%',
-            objectFit: 'contain', opacity: '0', zIndex: '1'
+            objectFit: 'contain', visibility: 'hidden', zIndex: '1'
         });
         if (vc0) {
             if (getComputedStyle(vc0).position === 'static') vc0.style.position = 'relative';
-            vc0.appendChild(vHigh);
+            vc0.appendChild(vNew);
         }
 
-        const FADE_MS = 1500;
-        let started = false, failed = false;
+        const HOLD_MS = 1500; // 新流出画面后继续播放这么久，再硬切
+        let done = false, failed = false;
 
         const fail = () => {
             failed = true;
-            try { highHls.destroy(); } catch (_) {}
-            try { vHigh.remove(); } catch (_) {}
+            try { newHls.destroy(); } catch (_) {}
+            try { vNew.remove(); } catch (_) {}
             drop();
         };
 
-        const finish = (targetMuted, targetVol) => {
+        const swap = () => {
+            if (done || failed) return;
+            if (this.isRecording || videos.length !== 1 || !vNew.isConnected) { fail(); return; }
+            done = true;
             try {
-                // 蓝光成为正式主视频：转成 v0 同款 flex 子元素样式
-                Object.assign(vHigh.style, {
-                    position: 'static', top: '', left: '', width: 'auto', height: '100%', opacity: '1', zIndex: ''
+                const targetMuted = v0.muted || v0.volume === 0;
+                const targetVol = v0.volume;
+                // 新流转正：变成与 v0 同款 flex 子元素并立即可见
+                Object.assign(vNew.style, {
+                    position: 'static', top: '', left: '', width: 'auto', height: '100%', visibility: 'visible', zIndex: ''
                 });
-                vHigh.muted = targetMuted;
-                vHigh.volume = targetMuted ? 0 : targetVol;
-                // 销毁低清、移除低清 v0
-                const oldHls = this.fullPreviewHlsInstances.find(h => h !== highHls);
+                vNew.muted = targetMuted;
+                vNew.volume = targetMuted ? 0 : targetVol;
+                // 销毁旧流、移除旧 v0
+                const oldHls = this.fullPreviewHlsInstances.find(h => h !== newHls);
                 if (oldHls) { try { oldHls.destroy(); } catch (_) {} }
                 try { v0.pause(); v0.src = ''; v0.remove(); } catch (_) {}
-                // 引用切到蓝光（videos 即 previewContainer._videos，控制条/镜像随之生效）
-                videos[0] = vHigh;
-                this.currentBigVideo = vHigh;
-                this.fullPreviewHlsInstances = [highHls];
-                Logger.log('大屏已交叉淡入到蓝光');
-            } catch (e) { Logger.error('升清收尾失败:', e); }
+                // 引用切到新流（videos 即 previewContainer._videos，控制条/镜像随之生效）
+                videos[0] = vNew;
+                this.currentBigVideo = vNew;
+                this.fullPreviewHlsInstances = [newHls];
+                Logger.log('大屏已切换清晰度');
+            } catch (e) { Logger.error('切换清晰度收尾失败:', e); }
         };
 
-        const startCrossfade = () => {
-            if (started || failed) return;
-            if (this.isRecording || videos.length !== 1 || !vHigh.isConnected) { fail(); return; }
-            started = true;
+        // 新流出画面 → 继续播 1.5s → 硬切
+        const onReady = () => {
+            if (done || failed) return;
             clearTimeout(fb);
-
-            const targetMuted = v0.muted || v0.volume === 0;
-            const targetVol = v0.volume;
-            if (!targetMuted) { vHigh.muted = false; vHigh.volume = 0; } // 允许音量淡入
-
-            const t0 = performance.now();
-            const ramp = (now) => {
-                const k = Math.min(1, (now - t0) / FADE_MS);
-                v0.style.opacity = String(1 - k);
-                vHigh.style.opacity = String(k);
-                if (!targetMuted) {
-                    try { v0.volume = targetVol * (1 - k); } catch (_) {}
-                    try { vHigh.volume = targetVol * k; } catch (_) {}
-                }
-                if (k < 1) requestAnimationFrame(ramp);
-                else finish(targetMuted, targetVol);
-            };
-            requestAnimationFrame(ramp);
+            setTimeout(swap, HOLD_MS);
         };
 
-        highHls.on(Hls.Events.MANIFEST_PARSED, () => { vHigh.play().catch(() => {}); });
-        vHigh.addEventListener('canplay', startCrossfade, { once: true });
-        const fb = setTimeout(startCrossfade, 6000); // 兜底
-        highHls.on(Hls.Events.ERROR, (event, data) => {
-            if (data && data.fatal && !started) { clearTimeout(fb); fail(); }
+        newHls.on(Hls.Events.MANIFEST_PARSED, () => { vNew.play().catch(() => {}); });
+        vNew.addEventListener('canplay', onReady, { once: true });
+        const fb = setTimeout(() => { if (!done && !failed) swap(); }, 8000); // 兜底：canplay 未触发也切
+        newHls.on(Hls.Events.ERROR, (event, data) => {
+            if (data && data.fatal && !done) { clearTimeout(fb); fail(); }
         });
-        try { highHls.loadSource(highUrl); highHls.attachMedia(vHigh); }
+        try { newHls.loadSource(newUrl); newHls.attachMedia(vNew); }
         catch (_) { clearTimeout(fb); fail(); }
     },
 
     /**
-     * 大屏右下角「手动切清晰度」按钮：chip 显示当前档，点开列出可用档位，选则平滑交叉淡入切换。
+     * 大屏右下角「手动切清晰度」按钮：chip 显示当前档，点开列出可用档位，选则新流出画面后续播 1.5s 再硬切。
      * 录制中 / 三联屏开启时禁止切换。
      * @param {HTMLVideoElement[]} videos - 大屏视频数组
      * @param {HTMLElement} previewContainer - 大屏容器（存当前档位 _curQuality）
@@ -775,8 +762,8 @@ wow，好热闹;
         // 上弹菜单
         const menu = document.createElement('div');
         Object.assign(menu.style, {
-            position: 'absolute', right: '0', bottom: '40px', background: 'rgba(0,0,0,0.88)',
-            borderRadius: '6px', overflow: 'hidden', display: 'none', minWidth: '72px',
+            position: 'absolute', left: '0', right: '0', bottom: '40px', background: 'rgba(0,0,0,0.88)',
+            borderRadius: '6px', overflow: 'hidden', display: 'none',
             boxShadow: '0 2px 10px rgba(0,0,0,0.4)'
         });
         const buildMenu = () => {
@@ -785,7 +772,7 @@ wow，好热闹;
                 const item = document.createElement('div');
                 item.textContent = LABELS[q] || q;
                 Object.assign(item.style, {
-                    padding: '8px 14px', color: q === previewContainer._curQuality ? '#ff2c55' : '#fff',
+                    padding: '8px 6px', color: q === previewContainer._curQuality ? '#ff2c55' : '#fff',
                     fontSize: '13px', cursor: 'pointer', whiteSpace: 'nowrap', textAlign: 'center'
                 });
                 item.addEventListener('mouseenter', () => { item.style.background = 'rgba(255,255,255,0.14)'; });
@@ -799,7 +786,7 @@ wow，好热闹;
                     if (videos.length !== 1) { ToastManager.show('三联屏下不可切换清晰度', TOAST.TYPE.ERROR); return; }
                     previewContainer._curQuality = q;
                     renderLabel();
-                    this._crossfadeBigScreenQuality(videos, map[q], previewContainer);
+                    this._switchBigScreenQuality(videos, map[q], previewContainer);
                 };
                 menu.appendChild(item);
             });
