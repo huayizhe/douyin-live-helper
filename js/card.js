@@ -5,6 +5,7 @@
 import { Logger } from './logger.js';
 import { DOMUtils } from './utils.js';
 import { PreviewManager } from './preview.js';
+import { PreloadManager } from './preload.js';
 import { FavoriteManager } from './favorite.js';
 
 const LiveCard = {
@@ -189,6 +190,9 @@ const LiveCard = {
     /**
      * 设置预览效果
      * @private
+     *
+     * 新模型（抖音式）：卡片进入视口后由 ClipManager 录制循环片段并叠加播放（会动的缩略图），
+     * 加载逻辑统一在 modal.js 的视口观察器里。这里只负责：封面占位 + 悬浮取消静音。
      */
     setupPreviewAndPreview(card, live) {
         const cardPreview = card.querySelector('.live-preview');
@@ -197,14 +201,15 @@ const LiveCard = {
             return;
         }
 
-        // 设置初始背景图（优先使用上次预览捕获的帧截图，其次按 roomUrl 命中缓存，最后用封面）
+        // 设置初始背景封面占位（片段就绪前不黑屏；优先上次截图，其次封面）
         cardPreview.style.backgroundImage = `url(${live.capturedPreview || PreviewManager.previewCache.get(live.roomUrl) || live.cover})`;
         cardPreview.style.backgroundSize = 'cover';
         cardPreview.style.backgroundPosition = 'center';
         cardPreview.style.position = 'relative';
 
-        //直播卡片预览
-        PreviewManager.setupPreview(cardPreview, live);
+        // 悬浮给该路循环片段取消静音（沿用全局声音设置），移出恢复静音
+        cardPreview.addEventListener('mouseenter', () => PreloadManager.unmuteCard(cardPreview));
+        cardPreview.addEventListener('mouseleave', () => PreloadManager.muteCard(cardPreview));
     },
 
     /**

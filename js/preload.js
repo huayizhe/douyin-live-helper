@@ -1,332 +1,367 @@
 /** @charset UTF-8 */
 
 /**
- * 预加载管理器模块
+ * 循环片段管理器（ClipManager）
+ *
+ * 抖音式「会动的缩略图」：可见卡片进入视口后，后台拉一小段最低清晰度直播，
+ * 用 MediaRecorder 录成本地 blob，随后**销毁 HLS 实例、断开连接**，把 blob 设为
+ * `<video loop muted>` 循环播放。稳态下每路几乎零带宽、零长连接，这是「整屏全部加载」
+ * 能撑住的前提。封面先显示不黑屏，加载好再盖上去；按 roomUrl 缓存，再次滚动不重载。
+ *
+ * 为兼容历史调用，导出名仍为 PreloadManager，并保留 preloadCache / maxBufferSize / init。
  */
 
 import { Logger } from './logger.js';
-import { NetworkUtils, SpeechUtils, DOMUtils, HLSUtils } from './utils.js';
-import { NETWORK } from './constants.js';
+import { NetworkUtils, DOMUtils, HLSUtils } from './utils.js';
+import { SettingsManager } from './settings.js';
 
-// 确保 HLS.js 可用
 const HLS = window.Hls;
 
-/**
- * 预加载管理器
- * @type {Object}
- */
 export const PreloadManager = {
-    // 存储预加载的视频流
+    // 录制片段缓存：Map<roomUrl, { blobUrl, timestamp }>（monitor.js 读取其 size）
     preloadCache: new Map(),
-    // 存储HLS实例
-    hlsInstances: new Map(),
-    // 存储视频元素
-    videoElements: new Map(),
-    // 最大缓存数量
-    maxCacheSize: 5,
-    // 预加载状态
-    loadingStatus: new Map(),
-    // 预加载更新间隔（30秒）
-    updateInterval: 30000,
-    // 添加最后更新时间记录
-    lastUpdateTimes: new Map(),
-    // 存储每个直播流的重试次数
-    retryCount: new Map(),
-    // 最大重试次数
-    maxRetries: 5,
+    // 每路片段的内存估算（供 monitor.js 估算占用）
+    maxBufferSize: 1.5 * 1024 * 1024,
 
-    /**
-     * 初始化预加载管理器
-     */
+    // 状态机：Map<roomUrl, 'queued'|'loading'|'ready'|'error'>
+    status: new Map(),
+    // 重试计数：Map<roomUrl, number>
+    retry: new Map(),
+    // 当前可见且想要片段的卡片：Map<roomUrl, cardPreviewEl>
+    visible: new Map(),
+    // 待加载队列（{ live }）
+    queue: [],
+    // 正在加载/录制的路数
+    activeLoads: 0,
+
+    // —— 可调参数 ——
+    // 同时加载/录制的最大并发（削平 CPU/带宽峰值，其余排队）
+    MAX_CONCURRENT: 3,
+    // 片段缓存软上限，超出按时间淘汰
+    MAX_CACHE: 40,
+    // 单段录制时长（毫秒）
+    RECORD_MS: 12000,
+    // 单路加载/录制整体超时（毫秒）
+    LOAD_TIMEOUT: 20000,
+    // 最大重试次数
+    MAX_RETRY: 2,
+
     init() {
-        // 检查 HLS.js 是否可用
         if (!HLS) {
-            Logger.error('HLS.js 未加载，预加载功能将不可用');
-            return;
+            Logger.error('HLS.js 未加载，循环片段功能不可用');
         }
     },
 
     /**
-     * 创建预加载视频元素
+     * 选择录制用的 MIME 类型（优先 vp9，回退 vp8）
      * @private
-     * @returns {HTMLVideoElement} 视频元素
      */
-    createPreloadVideo() {
+    _pickMimeType() {
+        const candidates = [
+            'video/webm;codecs=vp9,opus',
+            'video/webm;codecs=vp8,opus',
+            'video/webm'
+        ];
+        for (const t of candidates) {
+            if (window.MediaRecorder && MediaRecorder.isTypeSupported(t)) return t;
+        }
+        return '';
+    },
+
+    /**
+     * 确保某卡片拥有循环片段：命中缓存直接挂上播放，否则入队后台加载。
+     * @param {Object} live - 直播信息（含 roomUrl / streamUrlHlsMap）
+     * @param {HTMLElement} cardPreview - 卡片预览容器（.live-preview）
+     */
+    ensureClip(live, cardPreview) {
+        if (!live || !live.roomUrl || !cardPreview) return;
+        const roomUrl = live.roomUrl;
+
+        // 记录当前可见卡片（重渲染后是新的 DOM 节点）
+        this.visible.set(roomUrl, cardPreview);
+
+        // 命中缓存：直接挂循环视频
+        if (this.preloadCache.has(roomUrl)) {
+            this.attachLoop(roomUrl, cardPreview);
+            return;
+        }
+
+        // 已在加载/排队中：等其完成即可
+        const st = this.status.get(roomUrl);
+        if (st === 'loading' || st === 'queued') return;
+
+        // error 状态允许再次进入视口时重试
+        this.status.set(roomUrl, 'queued');
+        this.queue.push({ live });
+        this._pump();
+    },
+
+    /**
+     * 卡片离开视口：移除正在播放的循环视频以释放解码，但保留缓存 blob。
+     * @param {string} roomUrl
+     * @param {HTMLElement} cardPreview
+     */
+    release(roomUrl, cardPreview) {
+        if (this.visible.get(roomUrl) === cardPreview) {
+            this.visible.delete(roomUrl);
+        }
+        this._removeLoopVideo(cardPreview);
+    },
+
+    /**
+     * 调度队列：在并发上限内尽量多地启动加载。
+     * @private
+     */
+    _pump() {
+        while (this.activeLoads < this.MAX_CONCURRENT && this.queue.length > 0) {
+            const { live } = this.queue.shift();
+            // 排队期间若已被其它途径缓存，跳过
+            if (this.preloadCache.has(live.roomUrl)) {
+                this.status.set(live.roomUrl, 'ready');
+                this._tryAttachVisible(live.roomUrl);
+                continue;
+            }
+            this._startLoad(live);
+        }
+    },
+
+    /**
+     * 启动单路：拉最低清晰度 → 录制 → blob → 销毁 HLS → 缓存 → 挂载。
+     * @private
+     */
+    _startLoad(live) {
+        const roomUrl = live.roomUrl;
+        this.activeLoads++;
+        this.status.set(roomUrl, 'loading');
+        Logger.log('开始加载循环片段:', live.anchor);
+
+        const url = NetworkUtils.getLowestQualityUrl(live.streamUrlHlsMap);
+        if (!url) {
+            this._finishLoad(roomUrl, false, '无可用流地址');
+            return;
+        }
+
+        // 离屏隐藏视频（用离屏定位而非 display:none，避免解码被节流影响 captureStream）
         const video = DOMUtils.createElement('video', {
             styles: {
-                display: 'none'
+                position: 'fixed', left: '-10000px', top: '0',
+                width: '180px', height: '320px', opacity: '0', pointerEvents: 'none', zIndex: '-1'
             },
-            attributes: {
-                muted: 'true',
-                playsInline: 'true',
-                preload: 'auto'
-            }
+            attributes: { playsInline: 'true', preload: 'auto' }
         });
-        
-        // 设置音量（因为volume不是标准attribute，需要单独设置）
+        video.muted = true;
         video.volume = 0;
-        
         document.body.appendChild(video);
-        return video;
-    },
 
-    /**
-     * 设置HLS错误处理
-     * @private
-     * @param {Hls} hlsInstance - HLS实例
-     * @param {string} roomUrl - 直播间URL
-     * @param {string} anchor - 主播名称
-     */
-    setupHLSErrorHandling(hlsInstance, roomUrl, anchor) {
-        hlsInstance.on(HLS.Events.ERROR, (event, data) => {
-            // 获取当前重试次数
-            let retries = this.retryCount.get(roomUrl) || 0;
+        let hls = null;
+        let recorder = null;
+        let done = false;
+        const chunks = [];
 
-            Logger.warn(`主播 ${anchor} 的预加载错误详情:`, {
-                type: data.type,
-                details: data.details,
-                fatal: data.fatal,
-                url: data.url,
-                response: data.response,
-                retries: retries,
-                headers: data.networkDetails ? data.networkDetails.getAllResponseHeaders() : null
-            });
+        // 整体超时保护
+        const timeout = setTimeout(() => {
+            if (!done) cleanup(false, '加载超时');
+        }, this.LOAD_TIMEOUT);
 
-            // 如果超过最大重试次数，停止重试
-            if (retries >= this.maxRetries) {
-                Logger.error(`主播 ${anchor} 的预加载失败，已达到最大重试次数 ${this.maxRetries} 次，停止重试`);
-                this.cleanupStream(roomUrl);
-                this.loadingStatus.set(roomUrl, 'error');
-                this.retryCount.delete(roomUrl);
+        const cleanup = (ok, reason, blobUrl) => {
+            if (done) return;
+            done = true;
+            clearTimeout(timeout);
+            try { if (recorder && recorder.state !== 'inactive') recorder.stop(); } catch (_) {}
+            try { if (hls) { hls.stopLoad(); hls.destroy(); } } catch (_) {}
+            try { video.pause(); video.src = ''; video.remove(); } catch (_) {}
+            this._finishLoad(roomUrl, ok, reason, blobUrl, live);
+        };
+
+        // 录满 RECORD_MS 后停止录制，落地 blob
+        const startRecording = () => {
+            const mimeType = this._pickMimeType();
+            try {
+                const srcStream = video.captureStream ? video.captureStream() : video.mozCaptureStream();
+                recorder = new MediaRecorder(srcStream, mimeType
+                    ? { mimeType, videoBitsPerSecond: 1200000 }
+                    : { videoBitsPerSecond: 1200000 });
+            } catch (e) {
+                cleanup(false, '创建录制器失败');
                 return;
             }
-
-            if (data.type === HLS.ErrorTypes.NETWORK_ERROR) {
-                Logger.warn(`主播 ${anchor} 的预加载网络错误，第 ${retries + 1} 次重试:`, data);
-                this.retryCount.set(roomUrl, retries + 1);
-                hlsInstance.startLoad();
-            } else if (data.type === HLS.ErrorTypes.MEDIA_ERROR) {
-                Logger.warn(`主播 ${anchor} 的预加载媒体错误，第 ${retries + 1} 次重试:`, data);
-                this.retryCount.set(roomUrl, retries + 1);
-                hlsInstance.recoverMediaError();
-            } else if (data.fatal) {
-                Logger.error(`主播 ${anchor} 的预加载致命错误:`, data);
-                this.cleanupStream(roomUrl);
-                this.loadingStatus.set(roomUrl, 'error');
-                this.retryCount.delete(roomUrl);
-            }
-        });
-
-        hlsInstance.on(HLS.Events.MANIFEST_LOADED, (event, data) => {
-            Logger.log(`主播 ${anchor} 的预加载成功:`, data);
-            // 重置重试次数
-            this.retryCount.delete(roomUrl);
-        });
-    },
-
-    /**
-     * 监控视频缓冲状态
-     * @private
-     * @param {HTMLVideoElement} video - 视频元素
-     * @param {Object} live - 直播信息
-     * @param {string} streamUrl - 流地址
-     */
-    monitorBufferStatus(video, live, streamUrl) {
-        let active = true;
-        if (!this._bufferMonitors) this._bufferMonitors = new Map();
-        this._bufferMonitors.set(live.roomUrl, () => { active = false; });
-
-        const checkBuffer = () => {
-            if (!active) return;
-            if (video.buffered.length) {
-                const buffered = video.buffered.end(0) - video.buffered.start(0);
-                // 缓冲区大于5秒，则认为预加载完成
-                if (buffered >= 5) {
-                    this._bufferMonitors.delete(live.roomUrl);
-                    this.cacheStream(live.roomUrl, {
-                        hls: this.hlsInstances.get(live.roomUrl),
-                        video,
-                        // 预览默认使用标清
-                        quality: NETWORK.DOWNLINK_SPEED.SD1,
-                        timestamp: Date.now(),
-                        anchor: live.anchor,
-                        streamUrl
-                    });
-                    Logger.log(`主播 ${live.anchor} 的直播流预加载完成`);
-                    return;
-                }
-            }
-            requestAnimationFrame(checkBuffer);
+            recorder.ondataavailable = (e) => { if (e.data && e.data.size) chunks.push(e.data); };
+            recorder.onstop = () => {
+                if (!chunks.length) { cleanup(false, '录制无数据'); return; }
+                const blob = new Blob(chunks, { type: chunks[0].type || 'video/webm' });
+                const blobUrl = URL.createObjectURL(blob);
+                cleanup(true, null, blobUrl);
+            };
+            recorder.start();
+            setTimeout(() => { try { if (recorder.state !== 'inactive') recorder.stop(); } catch (_) {} }, this.RECORD_MS);
         };
-        checkBuffer();
+
+        // 首帧开始播放即开录（此时已有真实画面）
+        video.addEventListener('playing', () => { if (!done && !recorder) startRecording(); }, { once: true });
+
+        if (HLS && HLS.isSupported()) {
+            hls = new HLS(HLSUtils.createPreloadConfig());
+            hls.on(HLS.Events.ERROR, (event, data) => {
+                if (data && data.fatal && !recorder) cleanup(false, 'HLS致命错误');
+            });
+            hls.loadSource(url);
+            hls.attachMedia(video);
+            hls.on(HLS.Events.MANIFEST_PARSED, () => { video.play().catch(() => {}); });
+        } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
+            video.src = url;
+            video.addEventListener('loadedmetadata', () => { video.play().catch(() => {}); });
+            video.addEventListener('error', () => { if (!recorder) cleanup(false, '原生HLS错误'); });
+        } else {
+            cleanup(false, '浏览器不支持HLS');
+        }
     },
 
     /**
-     * 预加载直播流
-     * @param {Object} live - 直播信息对象
+     * 单路收尾：成功则缓存 blob 并挂到可见卡片；失败则按需重试；最后释放并发槽并继续调度。
+     * @private
      */
-    async preloadStream(live) {
-        Logger.log('进入preloadStream:', live);
-        
-        if (!HLS) {
-            Logger.error('HLS.js 未加载，无法预加载');
-            return;
-        }
+    _finishLoad(roomUrl, ok, reason, blobUrl, live) {
+        this.activeLoads = Math.max(0, this.activeLoads - 1);
 
-        // 如果正在加载或者已经缓存，则直接返回
-        if (this.loadingStatus.get(live.roomUrl) === 'loading' || 
-            this.preloadCache.has(live.roomUrl)) {
-            return;
-        }
-
-        Logger.log('开始预加载主播直播流:', live.anchor);
-        // 设置加载状态为正在加载
-        this.loadingStatus.set(live.roomUrl, 'loading');
-
-        try {
-            const video = this.createPreloadVideo();
-            this.videoElements.set(live.roomUrl, video);
-
-            if (HLS.isSupported()) {
-                // 创建HLS实例
-                const hlsInstance = new HLS(HLSUtils.createPreloadConfig());
-                // 设置HLS错误处理
-                this.setupHLSErrorHandling(hlsInstance, live.roomUrl, live.anchor);
-                // 存储HLS实例
-                this.hlsInstances.set(live.roomUrl, hlsInstance);
-                // 获取最低清晰度的流地址
-                const lowestQualityUrl = NetworkUtils.getLowestQualityUrl(live.streamUrlHlsMap);
-                // 加载流地址
-                hlsInstance.loadSource(lowestQualityUrl);
-                // 将视频元素与HLS实例关联
-                hlsInstance.attachMedia(video);
-                // 监听HLS实例的MANIFEST_PARSED事件，表示流地址解析完成
-                hlsInstance.on(HLS.Events.MANIFEST_PARSED, () => {
-                    video.play().catch(() => {});
-                    // 监控缓冲状态
-                    this.monitorBufferStatus(video, live, lowestQualityUrl);
-                });
-
-            } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
-                // 如果HLS.js不可用，则使用原生HLS播放
-                const lowestQualityUrl = NetworkUtils.getLowestQualityUrl(live.streamUrlHlsMap);
-                video.src = lowestQualityUrl;
-                // 监听视频的loadedmetadata事件，表示视频元数据加载完成
-                video.addEventListener('loadedmetadata', () => {
-                    // 播放视频
-                    video.play().catch(() => {});
-                });
+        if (ok && blobUrl) {
+            this._cacheClip(roomUrl, blobUrl);
+            this.status.set(roomUrl, 'ready');
+            this.retry.delete(roomUrl);
+            this._tryAttachVisible(roomUrl);
+            Logger.log('循环片段就绪:', roomUrl);
+        } else {
+            const n = (this.retry.get(roomUrl) || 0) + 1;
+            Logger.warn(`循环片段加载失败(${reason})，第 ${n} 次:`, roomUrl);
+            if (live && n <= this.MAX_RETRY) {
+                this.retry.set(roomUrl, n);
+                this.status.set(roomUrl, 'queued');
+                // 退避后重新入队（卡片仍在视口才有意义）
+                setTimeout(() => {
+                    if (this.visible.has(roomUrl) && !this.preloadCache.has(roomUrl)) {
+                        this.queue.push({ live });
+                        this._pump();
+                    } else {
+                        this.status.delete(roomUrl);
+                    }
+                }, 1500 * n);
+            } else {
+                this.status.set(roomUrl, 'error');
             }
-
-        } catch (error) {
-            // 捕获错误
-            Logger.error(`预加载主播 ${live.anchor} 的直播流失败:`, error);
-            // 设置加载状态为错误
-            this.loadingStatus.set(live.roomUrl, 'error');
-            // 清理直播流
-            this.cleanupStream(live.roomUrl);
         }
 
-        // 设置最后更新时间
-        this.lastUpdateTimes.set(live.roomUrl, Date.now());
+        this._pump();
     },
 
     /**
-     * 缓存直播流
-     * @param {string} roomUrl - 直播间URL
-     * @param {Object} streamData - 流数据
+     * 缓存片段 blob，超出软上限按时间淘汰最旧者并释放其 URL。
+     * @private
      */
-    cacheStream(roomUrl, streamData) {
-        Logger.log('进入cacheStream:', roomUrl, streamData);
-        // 检查缓存大小
-        if (this.preloadCache.size >= this.maxCacheSize) {
-            // 删除最旧的缓存
-            const oldestKey = Array.from(this.preloadCache.entries())
-                .sort(([, a], [, b]) => a.timestamp - b.timestamp)[0][0];
-            this.cleanupStream(oldestKey);
+    _cacheClip(roomUrl, blobUrl) {
+        const old = this.preloadCache.get(roomUrl);
+        if (old && old.blobUrl && old.blobUrl !== blobUrl) {
+            try { URL.revokeObjectURL(old.blobUrl); } catch (_) {}
         }
-        // 缓存流数据
-        this.preloadCache.set(roomUrl, streamData);
-        // 更新流的加载状态
-        this.loadingStatus.set(roomUrl, 'loaded');
+        this.preloadCache.set(roomUrl, { blobUrl, timestamp: Date.now() });
+
+        while (this.preloadCache.size > this.MAX_CACHE) {
+            // 找最旧且当前不可见的条目优先淘汰
+            let oldestKey = null, oldestTs = Infinity;
+            for (const [k, v] of this.preloadCache.entries()) {
+                if (this.visible.has(k)) continue; // 尽量不淘汰正在显示的
+                if (v.timestamp < oldestTs) { oldestTs = v.timestamp; oldestKey = k; }
+            }
+            if (oldestKey == null) break; // 全部可见，不强淘汰
+            this._evict(oldestKey);
+        }
     },
 
     /**
-     * 清理直播流
-     * @param {string} roomUrl - 直播间URL
+     * 淘汰一条缓存：释放 blob URL 并清状态。
+     * @private
      */
-    cleanupStream(roomUrl) {
-        Logger.log('进入cleanupStream:', roomUrl);
-        // 停止该流的缓冲监控 rAF 循环
-        if (this._bufferMonitors && this._bufferMonitors.has(roomUrl)) {
-            this._bufferMonitors.get(roomUrl)();
-            this._bufferMonitors.delete(roomUrl);
-        }
-        // 获取缓存的流数据
-        const cached = this.preloadCache.get(roomUrl);
-        // 获取HLS实例
-        const hlsInstance = this.hlsInstances.get(roomUrl);
-        // 获取视频元素
-        const video = this.videoElements.get(roomUrl);
-        
-        if (hlsInstance) {
-            // 销毁HLS实例
-            hlsInstance.destroy();
-            // 删除HLS实例
-            this.hlsInstances.delete(roomUrl);
-        }
-
-        if (video) {
-            // 暂停视频
-            video.pause();
-            // 删除视频元素
-            video.remove();
-            // 删除视频元素
-            this.videoElements.delete(roomUrl);
-        }
-
-        // 删除缓存的流数据
+    _evict(roomUrl) {
+        const v = this.preloadCache.get(roomUrl);
+        if (v && v.blobUrl) { try { URL.revokeObjectURL(v.blobUrl); } catch (_) {} }
         this.preloadCache.delete(roomUrl);
-        // 删除流的加载状态
-        this.loadingStatus.delete(roomUrl);
-        // 删除最后更新时间
-        this.lastUpdateTimes.delete(roomUrl);
-        // 删除重试次数
-        this.retryCount.delete(roomUrl);
+        this.status.delete(roomUrl);
+        this.retry.delete(roomUrl);
     },
 
     /**
-     * 获取预加载的流
-     * @param {string} roomUrl - 直播间URL
-     * @returns {Object} 预加载的流数据
+     * 若该 room 当前有可见卡片，挂上循环视频。
+     * @private
      */
-    getPreloadedStream(roomUrl) {
-        Logger.log('进入getPreloadedStream:', roomUrl);
-        // 获取缓存的流数据
+    _tryAttachVisible(roomUrl) {
+        const card = this.visible.get(roomUrl);
+        if (card) this.attachLoop(roomUrl, card);
+    },
+
+    /**
+     * 把缓存的循环片段挂到卡片上播放（叠在封面之上）。
+     * @param {string} roomUrl
+     * @param {HTMLElement} cardPreview
+     */
+    attachLoop(roomUrl, cardPreview) {
         const cached = this.preloadCache.get(roomUrl);
-        // 如果缓存中没有流数据，则返回null
-        if (!cached) return null;
+        if (!cached || !cardPreview) return;
 
-        // 检查是否需要更新
-        const now = Date.now();
-        const lastUpdate = this.lastUpdateTimes.get(roomUrl) || 0;
+        // 已挂同一个 blob 则不重复创建
+        if (cardPreview._clipVideo && cardPreview._clipVideo.src === cached.blobUrl) return;
+        this._removeLoopVideo(cardPreview);
 
-        // 如果最后一次更新时间与当前时间相差大于更新间隔，则需要重新加载
-        if (now - lastUpdate > this.updateInterval) {
-            Logger.log(`主播 ${cached.anchor} 的预加载流已过期，需要重新加载`);
-            // 异步更新，不阻塞当前播放
-            setTimeout(() => {
-                this.cleanupStream(roomUrl);
-                this.preloadStream({ 
-                    roomUrl, 
-                    streamUrl: cached.streamUrl,
-                    anchor: cached.anchor 
-                });
-            }, 0);
+        const video = document.createElement('video');
+        Object.assign(video.style, {
+            position: 'absolute', top: '0', left: '0', width: '100%', height: '100%',
+            objectFit: 'cover', background: '#000', zIndex: '0'
+        });
+        video.src = cached.blobUrl;
+        video.loop = true;
+        video.muted = true;
+        video.volume = 0;
+        video.playsInline = true;
+        video.autoplay = true;
+        video.disablePictureInPicture = true;
+        video.oncontextmenu = (e) => e.preventDefault();
+
+        // 叠在背景封面之上，但在序号/复选框等覆盖层（z-index>=1）之下
+        cardPreview.insertBefore(video, cardPreview.firstChild);
+        cardPreview._clipVideo = video;
+        video.play().catch(() => {});
+    },
+
+    /**
+     * 给某卡片的循环视频取消静音（悬浮时调用，沿用全局声音设置）。
+     * @param {HTMLElement} cardPreview
+     */
+    unmuteCard(cardPreview) {
+        const v = cardPreview && cardPreview._clipVideo;
+        if (!v) return;
+        if (SettingsManager.isSoundEnabled()) {
+            v.muted = false;
+            v.volume = SettingsManager.getVolume();
         }
+    },
 
-        // 使用主播的预加载流进行播放
-        Logger.log(`使用主播 ${cached.anchor} 的预加载流进行播放`);
-        return cached;
+    /**
+     * 给某卡片的循环视频恢复静音（移出时调用）。
+     * @param {HTMLElement} cardPreview
+     */
+    muteCard(cardPreview) {
+        const v = cardPreview && cardPreview._clipVideo;
+        if (!v) return;
+        v.muted = true;
+        v.volume = 0;
+    },
+
+    /**
+     * 移除卡片上的循环视频，释放解码（保留缓存 blob）。
+     * @private
+     */
+    _removeLoopVideo(cardPreview) {
+        const v = cardPreview && cardPreview._clipVideo;
+        if (v) {
+            try { v.pause(); v.src = ''; v.remove(); } catch (_) {}
+            cardPreview._clipVideo = null;
+        }
     }
-}; 
+};

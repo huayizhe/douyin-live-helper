@@ -605,6 +605,8 @@ wow，好热闹;
      */
     openFullPreview(cardPreview, live) {
         this.currentLive = live;
+        // 占位封面元素（首帧到达后移除）
+        let placeholderEl = null;
         // 创建大屏预览模态框
         const modal = document.createElement('div');
         modal.id = this.modalId;
@@ -636,6 +638,21 @@ wow，好热闹;
             justifyContent: 'center',
             alignItems: 'center'
         });
+
+        // 占位封面：真直播首帧出来前用「当前帧/封面」作模糊背景，避免纯黑屏
+        const placeholderImg = live.capturedPreview || this.previewCache.get(live.roomUrl) || live.cover;
+        if (placeholderImg) {
+            const placeholder = document.createElement('div');
+            Object.assign(placeholder.style, {
+                position: 'absolute', inset: '0', zIndex: '0',
+                backgroundImage: `url(${placeholderImg})`,
+                backgroundSize: 'cover', backgroundPosition: 'center',
+                filter: 'blur(24px) brightness(0.6)', transform: 'scale(1.1)'
+            });
+            previewContainer.appendChild(placeholder);
+            // 首帧开始播放即移除占位（见下方 videos[0] 的 playing 监听）
+            placeholderEl = placeholder;
+        }
 
         // 创建视频组容器
         const videoGroupContainer = document.createElement('div');
@@ -783,9 +800,10 @@ wow，好热闹;
         `;
         previewContainer.appendChild(loadingOverlay);
 
-        // 首帧开始播放即隐藏加载层
+        // 首帧开始播放即隐藏加载层并移除占位封面
         videos[0].addEventListener('playing', () => {
             loadingOverlay.style.display = 'none';
+            if (placeholderEl) { placeholderEl.remove(); placeholderEl = null; }
         }, { once: true });
 
         // 修改视频同步逻辑

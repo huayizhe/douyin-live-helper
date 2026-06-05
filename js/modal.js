@@ -8,6 +8,7 @@ import { LiveCard } from './card.js';
 import { FavoriteManager } from './favorite.js';
 import { ResourceMonitor } from './monitor.js';
 import { PreviewManager } from './preview.js';
+import { PreloadManager } from './preload.js';
 import { SettingsManager } from './settings.js';
 import { ToastManager } from './toast.js';
 import { LicenseManager } from './license.js';
@@ -76,6 +77,8 @@ const ModalUI = {
                 const modal = DOMUtils.findElement('.live-modal');
                 if (modal) {
                     this.enableDouyinShortcuts();
+                    this._teardownClipObserver();
+                    PreloadManager.visible.clear();
                     modal.remove();
                 }
                 return;
@@ -134,10 +137,10 @@ const ModalUI = {
             className: 'live-modal-content',
             styles: {
                 background: isDarkMode ? '#161823' : 'white',
-                borderRadius: '8px',
+                borderRadius: '0',
                 position: 'relative',
-                width: '90vw',
-                height: '90vh',
+                width: '100vw',
+                height: '100vh',
                 display: 'flex',
                 flexDirection: 'column',
                 color: isDarkMode ? '#fff' : '#000'
@@ -377,6 +380,8 @@ const ModalUI = {
             if (modal) {
                 // 恢复抖音快捷键
                 this.enableDouyinShortcuts();
+                this._teardownClipObserver();
+                PreloadManager.visible.clear();
                 modal.remove();
             }
         };
@@ -552,6 +557,9 @@ const ModalUI = {
 
         container.innerHTML = '';
 
+        // 重建视口观察器（内部会先断开上一轮）。root 取 .live-grid 的滚动祖先（内容区 overflow:auto）
+        this._setupClipObserver(container.parentElement || null);
+
         list.forEach((live, index) => {
             // 截图保留依赖 live.capturedPreview（在 card.js 中作为背景图优先使用）
             const card = LiveCard.create(live, isDarkMode, index);
@@ -568,9 +576,48 @@ const ModalUI = {
                 });
             }
 
+            // 把 live 绑到预览容器上，供视口观察器回调取用
+            const cardPreview = card.querySelector('.live-preview');
+            if (cardPreview) {
+                cardPreview._live = live;
+                if (this._clipObserver) this._clipObserver.observe(cardPreview);
+            }
+
             container.appendChild(card);
         });
-        // 注：已取消列表的自动预加载（频繁请求易卡顿），改为悬浮某卡片时才按需加载
+    },
+
+    /**
+     * 视口驱动的循环片段加载：进入视口即 ensureClip（抖音式全视口预加载），
+     * 离开较远则释放正在播放的循环视频（保留缓存 blob，再回来不重新下载）。
+     * @private
+     */
+    _setupClipObserver(scrollRoot) {
+        this._teardownClipObserver();
+        if (typeof IntersectionObserver === 'undefined') return;
+        this._clipObserver = new IntersectionObserver((entries) => {
+            entries.forEach(entry => {
+                const cardPreview = entry.target;
+                const live = cardPreview._live;
+                if (!live) return;
+                if (entry.isIntersecting) {
+                    PreloadManager.ensureClip(live, cardPreview);
+                } else {
+                    PreloadManager.release(live.roomUrl, cardPreview);
+                }
+            });
+        }, { root: scrollRoot || null, rootMargin: '300px 0px', threshold: 0.01 });
+    },
+
+    /**
+     * 断开循环片段观察器（重渲染/关闭弹窗时调用）。
+     * @private
+     */
+    _teardownClipObserver() {
+        if (this._clipObserver) {
+            this._clipObserver.disconnect();
+            this._clipObserver = null;
+        }
     },
 
     /**
