@@ -83,12 +83,19 @@ const ModalUI = {
     disableDouyinShortcuts() {
         // 创建事件处理器
         this.keydownHandler = (e) => {
-            // ESC 键关闭关注直播列表（分级处理）
+            // ESC 键：先关「最上层」的浮层，再关列表（标准栈式关闭，体验统一不出错）
             if (e.key === 'Escape') {
-                // 大屏/对比预览开着 或 浏览器全屏中：本次 ESC 交给上层处理，不关列表
+                // 大屏/对比预览/浏览器全屏：由它们自己的 ESC 处理，这里不插手
                 if (document.getElementById('dy-modal') ||
                     document.getElementById('dy-compare-modal') ||
                     document.fullscreenElement) return;
+                // 1) PRO 授权弹窗（z-index 最高）
+                const proDialog = document.getElementById('dylh-overlay');
+                if (proDialog) { e.stopPropagation(); proDialog.remove(); return; }
+                // 2) 资源监控面板
+                const resPanel = document.querySelector('.resource-monitor-panel');
+                if (resPanel && resPanel.style.display !== 'none') { e.stopPropagation(); ResourceMonitor.hidePanel(); return; }
+                // 3) 否则关闭直播列表
                 const modal = DOMUtils.findElement('.live-modal');
                 if (modal) {
                     this.enableDouyinShortcuts();
@@ -227,8 +234,13 @@ const ModalUI = {
         [favoriteButton, sortButton, refreshButton, globalSoundBtn,
          compareButton, clearCompareButton, scrollTopButton, resourceButton, licenseBtn, liveCount]
             .forEach(btn => { if (btn) Object.assign(btn.style, MENU_BTN); });
-        // PRO 按钮：与其它按钮等大（badge 由 CSS 填满整框），仅外观不同
-        Object.assign(licenseBtn.style, { display: 'flex', alignItems: 'center', justifyContent: 'center' });
+        // PRO 按钮：与其它按钮等大（badge 由 CSS 填满整框），去掉左右 padding 让金色 badge 占满 104px
+        Object.assign(licenseBtn.style, { display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '0' });
+
+        // 强迫症：不足 4 个字的标签撑成 4 字宽（两端对齐＝中间空格填充观感），>=4 字不动。
+        // 声音按钮会重建 innerHTML，其 updateIcon 内已自带 _justifyShortLabel，这里不重复处理。
+        [favoriteButton, sortButton, refreshButton, compareButton, clearCompareButton, scrollTopButton, resourceButton, globalSoundBtn]
+            .forEach(btn => { if (btn) this._justifyShortLabel(btn.querySelector('span')); });
 
         // 搜索框：宽度 = 两个按钮宽 + 一个间隔（与按钮网格对齐显得整齐），高度对齐 36
         const btnW = parseInt(MENU_BTN.width, 10);   // 104
@@ -261,6 +273,24 @@ const ModalUI = {
         header.appendChild(closeButton);       // 右侧关闭按钮
 
         return header;
+    },
+
+    /**
+     * 让不足 4 个字的中文标签两端对齐撑成 4 字宽（视觉上中间空格填充），≥4 字不动。
+     * @private
+     * @param {HTMLElement|null} span - 标签元素
+     */
+    _justifyShortLabel(span) {
+        if (!span) return;
+        const t = (span.textContent || '').trim();
+        if (t.length >= 2 && t.length < 4) {
+            Object.assign(span.style, {
+                display: 'inline-block',
+                width: '4em',
+                textAlign: 'justify',
+                textAlignLast: 'justify'
+            });
+        }
     },
 
     /**
@@ -953,6 +983,7 @@ const ModalUI = {
         const updateIcon = (btn, enabled) => {
             btn.innerHTML = `${enabled ? soundOnSvg : soundOffSvg}<span style="margin-left:4px">${enabled ? '放音' : '静音'}</span>`;
             btn.style.color = enabled ? (isDarkMode ? '#fff' : '#000') : '#ff2c55';
+            this._justifyShortLabel(btn.querySelector('span')); // 重建 innerHTML 后保持「撑成 4 字宽」
         };
 
         const btn = DOMUtils.createElement('button', {
@@ -1201,12 +1232,14 @@ const ModalUI = {
 
         // 添加资源按钮点击事件
         resourceButton.addEventListener('click', () => {
-            // 初始化并显示资源监控面板
-            if (!this.resourceMonitor) {
+            // 初始化并显示资源监控面板（任何报错都弹出来，避免「点了没反应」难排查）
+            try {
                 this.resourceMonitor = ResourceMonitor;
-                this.resourceMonitor.init();
+                this.resourceMonitor.showPanel();
+            } catch (e) {
+                Logger.error('打开资源监控失败:', e);
+                ToastManager.show('资源监控打开失败：' + (e && e.message), 'error');
             }
-            this.resourceMonitor.showPanel();
         });
 
         return resourceButton;
@@ -1217,9 +1250,10 @@ const ModalUI = {
      * @private
      */
     createLiveCountElement(isDarkMode) {
-        // 与菜单按钮同款外观，但纯展示：无 hover 背景、无点击
+        // 与菜单按钮同款外观，但纯展示：无 hover 背景、无点击。初始显示「加载中…」，统计出来再替换
         return DOMUtils.createElement('span', {
             className: 'live-count',
+            innerHTML: '加载中…',
             styles: {
                 display: 'flex',
                 alignItems: 'center',
@@ -1242,7 +1276,7 @@ const ModalUI = {
     updateLiveCount(modal, count) {
         const liveCount = modal.querySelector('.live-count');
         if (liveCount) {
-            liveCount.textContent = `${count}直播`;
+            liveCount.textContent = `${count}个直播`;
         }
     },
 

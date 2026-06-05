@@ -131,56 +131,57 @@ export const ResourceMonitor = {
         if (!this.panel || !this.last) return;
         const s = this.last;
         const dark = StyleUtils.isDarkMode();
-        const sub = dark ? '#aaa' : '#888';
+        const sub = dark ? '#8a8f99' : '#9aa0a6';
         const heapPct = s.heap ? (s.heap.used / s.heap.limit * 100) : 0;
 
-        // ① 健康概览（三个带色大数字）
-        const big = (label, val, color, unit = '') => `
-            <div style="flex:1;text-align:center;">
-                <div style="font-size:24px;font-weight:bold;color:${color};line-height:1.1;">${val}${unit}</div>
-                <div style="font-size:12px;color:${sub};margin-top:4px;">${label}</div>
+        // 键值行：label 左（muted）…… value 右（等宽、可染色）
+        const row = (label, value, valColor) =>
+            `<div class="mon-row"><span class="mon-k">${label}</span><span class="mon-v"${valColor ? ` style="color:${valColor}"` : ''}>${value}</span></div>`;
+        const note = (text) => `<div class="mon-note">${text}</div>`;
+
+        // ① 健康概览（三张 stat 卡）
+        const stat = (label, val, color, unit = '') => `
+            <div class="mon-stat">
+                <div class="mon-stat-v" style="color:${color}">${val}<span class="mon-stat-u">${unit}</span></div>
+                <div class="mon-stat-l">${label}</div>
             </div>`;
         this.panel.querySelector('.mon-overview').innerHTML =
-            big('JS堆使用率', s.heap ? heapPct.toFixed(0) : '—', this.color(heapPct, this.TH.heapWarn, this.TH.heapBad), s.heap ? '%' : '') +
-            big('活跃HLS', s.hls.total, this.color(s.hls.total, this.TH.hlsWarn, this.TH.hlsBad)) +
-            big('加载中', s.loading, this.color(s.loading, s.maxConcurrent, s.maxConcurrent + 1));
+            stat('JS 堆使用率', s.heap ? heapPct.toFixed(0) : '—', this.color(heapPct, this.TH.heapWarn, this.TH.heapBad), s.heap ? '%' : '') +
+            stat('活跃 HLS', s.hls.total, this.color(s.hls.total, this.TH.hlsWarn, this.TH.hlsBad)) +
+            stat('加载中', s.loading, this.color(s.loading, s.maxConcurrent, s.maxConcurrent + 1));
 
         // ② JS 堆
-        this.panel.querySelector('.mon-heap').innerHTML = s.heap ? `
-            <div>已用：${this.fmt(s.heap.used)} ／ 总量：${this.fmt(s.heap.total)} ／ 限制：${this.fmt(s.heap.limit)}</div>
-            <div>使用率：<b style="color:${this.color(heapPct, this.TH.heapWarn, this.TH.heapBad)}">${heapPct.toFixed(1)}%</b></div>
-            <div style="color:${sub};font-size:12px;margin-top:4px;">⚠️ 仅 JS 堆，<b>不含视频解码/MSE 内存</b>（崩溃常来自后者，需结合「活跃HLS/video数」判断）</div>
-        ` : `<div style="color:${sub}">该浏览器不支持 performance.memory（非 Chrome 内核）</div>`;
+        this.panel.querySelector('.mon-heap').innerHTML = s.heap
+            ? row('已用 / 总量', `${this.fmt(s.heap.used)} / ${this.fmt(s.heap.total)}`) +
+              row('上限', this.fmt(s.heap.limit)) +
+              row('使用率', `${heapPct.toFixed(1)}%`, this.color(heapPct, this.TH.heapWarn, this.TH.heapBad)) +
+              note('⚠️ 仅 JS 堆，<b>不含视频解码 / MSE 内存</b>（崩溃常来自后者，需结合「活跃 HLS / video 数」判断）')
+            : note('该浏览器不支持 performance.memory（非 Chrome 内核）');
 
         // ③ 直播资源
-        this.panel.querySelector('.mon-live').innerHTML = `
-            <div>活跃 HLS 合计：<b style="color:${this.color(s.hls.total, this.TH.hlsWarn, this.TH.hlsBad)}">${s.hls.total}</b>
-                <span style="color:${sub}">（加载 ${s.hls.loading} ／ 悬浮 ${s.hls.hover} ／ 大屏 ${s.hls.full} ／ 对比 ${s.hls.compare}）</span></div>
-            <div>&lt;video&gt; 元素：${s.videoTotal} <span style="color:${sub}">（含抖音自身；我方循环视频 ${s.loopVideos}）</span></div>
-            <div>片段加载：进行中 ${s.loading} ／ 排队 ${s.queued} ／ 并发上限 ${s.maxConcurrent}</div>
-            <div>暂停状态：${s.pauseReasons.length ? s.pauseReasons.join('、') : '无'}</div>
-            <div>媒体缓冲（估算）：${s.media.bufferedSec.toFixed(0)}s ／ 解码中 ${s.media.decoding} 路
-                <span style="color:${sub}">（精确解码/GPU 内存无 JS API，此为代理）</span></div>
-        `;
+        this.panel.querySelector('.mon-live').innerHTML =
+            row('活跃 HLS 合计', s.hls.total, this.color(s.hls.total, this.TH.hlsWarn, this.TH.hlsBad)) +
+            row('— 加载 / 悬浮 / 大屏 / 对比', `${s.hls.loading} / ${s.hls.hover} / ${s.hls.full} / ${s.hls.compare}`) +
+            row('&lt;video&gt; 元素（含抖音 / 我方循环）', `${s.videoTotal} / ${s.loopVideos}`) +
+            row('片段加载 进行 / 排队 / 上限', `${s.loading} / ${s.queued} / ${s.maxConcurrent}`) +
+            row('暂停状态', s.pauseReasons.length ? s.pauseReasons.join('、') : '无') +
+            row('媒体缓冲 / 解码路数（估算）', `${s.media.bufferedSec.toFixed(0)}s / ${s.media.decoding}`) +
+            note('媒体缓冲为 MSE 代理（精确解码 / GPU 内存无 JS API）');
 
         // ④ 缓存
-        this.panel.querySelector('.mon-cache').innerHTML = `
-            <div>循环片段缓存：${s.cached} / ${s.maxCache} 个，真实占用 <b>${this.fmt(s.cacheBytes)}</b></div>
-            <div>截图缓存：${s.previewCount} 个 <span style="color:${sub}">（估算 ${this.fmt(s.previewBytes)}）</span></div>
-            <div style="color:${sub};font-size:12px;margin-top:4px;">注：缓存数≠播放数——离屏卡片保留 blob、移除 video 释放解码。</div>
-        `;
+        this.panel.querySelector('.mon-cache').innerHTML =
+            row('循环片段缓存', `${s.cached} / ${s.maxCache} 个 · ${this.fmt(s.cacheBytes)}`) +
+            row('截图缓存', `${s.previewCount} 个 · ${this.fmt(s.previewBytes)}`) +
+            note('缓存数 ≠ 播放数——离屏卡片保留 blob、移除 video 释放解码。');
 
-        // ⑤ 持久化存储（chrome.storage：磁盘 + 内存缓存）
-        this.panel.querySelector('.mon-storage').innerHTML = `
-            <div>氛围词条（storage.local）：<b>${this.fmt(s.storage.local)}</b></div>
-            <div>特别关心/设置（storage.sync）：<b>${this.fmt(s.storage.sync)}</b> <span style="color:${sub}">（sync 单项上限 8KB、总 100KB）</span></div>
-            <div style="color:${sub};font-size:12px;margin-top:4px;">存于 chrome.storage（磁盘）+ 一份内存缓存。氛围词条按主播数 × 文本长度增长。</div>
-        `;
+        // ⑤ 持久化存储
+        this.panel.querySelector('.mon-storage').innerHTML =
+            row('特别关心 + 设置 + 氛围词条', this.fmt(s.storage.local)) +
+            note('存于 <b>chrome.storage.local</b>（本机磁盘）+ 内存缓存；<b>不随账号同步、不联网</b>，非页面 localStorage。');
 
         // ⑥ 设备
-        this.panel.querySelector('.mon-device').innerHTML = `
-            <div>逻辑核数：${s.cores || '未知'} <span style="color:${sub}">（并发上限据此自适应为 ${s.maxConcurrent}）</span></div>
-        `;
+        this.panel.querySelector('.mon-device').innerHTML =
+            row('逻辑核数 / 并发上限', `${s.cores || '未知'} / ${s.maxConcurrent}`);
 
         this.drawSparkline();
     },
@@ -272,6 +273,7 @@ export const ResourceMonitor = {
      */
     createMonitorPanel() {
         const dark = StyleUtils.isDarkMode();
+        const sub = dark ? '#8a8f99' : '#9aa0a6';
         this.panel = DOMUtils.createElement('div', {
             className: 'resource-monitor-panel',
             styles: {
@@ -284,31 +286,57 @@ export const ResourceMonitor = {
         });
 
         this.panel.innerHTML = `
-            <div class="mon-header" style="padding:14px 18px;border-bottom:1px solid ${dark ? '#333' : '#eee'};display:flex;justify-content:space-between;align-items:center;cursor:move;user-select:none;">
-                <h3 style="margin:0;font-size:16px;">资源监控 <span style="font-size:11px;color:${dark ? '#888' : '#999'};font-weight:normal;">（可拖动）</span></h3>
-                <button class="mon-close" style="background:none;border:none;cursor:pointer;padding:4px;color:${dark ? '#fff' : '#000'};">✕</button>
+            <div class="mon-accent"></div>
+            <div class="mon-header" style="cursor:move;user-select:none;">
+                <h3>📊 资源监控 <span class="mon-hint">可拖动</span></h3>
+                <button class="mon-close" title="关闭">✕</button>
             </div>
-            <div style="padding:16px 18px;overflow-y:auto;">
-                <div class="mon-overview" style="display:flex;gap:8px;margin-bottom:16px;"></div>
-                <canvas class="mon-spark" style="width:100%;height:56px;display:block;margin-bottom:6px;"></canvas>
-                <div style="font-size:11px;color:${dark ? '#888' : '#999'};margin-bottom:16px;">趋势：<span style="color:#1890ff">▮</span> JS堆　<span style="color:#fa8c16">▮</span> 活跃HLS（线持续上扬＝可能泄漏）</div>
-
+            <div class="mon-body">
+                <div class="mon-overview"></div>
+                <div class="mon-sec mon-trend">
+                    <canvas class="mon-spark"></canvas>
+                    <div class="mon-legend"><span style="color:#1890ff">●</span> JS 堆　<span style="color:#fa8c16">●</span> 活跃 HLS　<span class="mon-note-inline">线持续上扬＝可能泄漏</span></div>
+                </div>
                 <div class="mon-sec"><h4>JS 堆内存</h4><div class="mon-box mon-heap"></div></div>
                 <div class="mon-sec"><h4>直播资源（实时驱动）</h4><div class="mon-box mon-live"></div></div>
                 <div class="mon-sec"><h4>缓存</h4><div class="mon-box mon-cache"></div></div>
                 <div class="mon-sec"><h4>持久化存储</h4><div class="mon-box mon-storage"></div></div>
                 <div class="mon-sec"><h4>设备</h4><div class="mon-box mon-device"></div></div>
-
-                <button class="mon-copy" style="margin-top:8px;width:100%;padding:10px;border:none;border-radius:6px;
-                    background:#1890ff;color:#fff;font-size:14px;cursor:pointer;">复制诊断信息</button>
+                <button class="mon-copy">复制诊断信息</button>
             </div>
         `;
 
+        const mono = `ui-monospace, SFMono-Regular, Menlo, Consolas, monospace`;
+        const cardBg = dark ? '#23252b' : '#f7f8fa';
+        const cardBd = dark ? '#33363d' : '#e8eaed';
         const style = document.createElement('style');
         style.textContent = `
-            .resource-monitor-panel .mon-sec { margin-bottom: 14px; }
-            .resource-monitor-panel .mon-sec h4 { margin:0 0 8px 0; font-size:13px; color:${dark ? '#aaa' : '#666'}; }
-            .resource-monitor-panel .mon-box { background:${dark ? '#2a2a2a' : '#f6f6f6'}; padding:10px 12px; border-radius:6px; line-height:1.7; }
+            .resource-monitor-panel { overflow:hidden; }
+            .resource-monitor-panel .mon-accent { height:3px; background:linear-gradient(90deg,#1890ff,#52c41a,#fa8c16); }
+            .resource-monitor-panel .mon-header { padding:13px 18px; display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid ${cardBd}; }
+            .resource-monitor-panel .mon-header h3 { margin:0; font-size:15px; font-weight:600; }
+            .resource-monitor-panel .mon-hint { font-size:11px; color:${sub}; font-weight:400; margin-left:4px; }
+            .resource-monitor-panel .mon-close { background:none; border:none; cursor:pointer; padding:4px 6px; font-size:15px; border-radius:6px; color:${dark ? '#bbb' : '#666'}; }
+            .resource-monitor-panel .mon-close:hover { background:${dark ? '#33363d' : '#eee'}; }
+            .resource-monitor-panel .mon-body { padding:14px 16px; overflow-y:auto; flex:1; min-height:0; }
+            .resource-monitor-panel .mon-overview { display:flex; gap:10px; margin-bottom:14px; }
+            .resource-monitor-panel .mon-stat { flex:1; text-align:center; padding:12px 6px; background:${cardBg}; border:1px solid ${cardBd}; border-radius:10px; }
+            .resource-monitor-panel .mon-stat-v { font-size:26px; font-weight:700; line-height:1.05; font-family:${mono}; }
+            .resource-monitor-panel .mon-stat-u { font-size:14px; font-weight:600; margin-left:1px; }
+            .resource-monitor-panel .mon-stat-l { font-size:11px; color:${sub}; margin-top:5px; }
+            .resource-monitor-panel .mon-sec { margin-bottom:12px; }
+            .resource-monitor-panel .mon-sec h4 { margin:0 0 7px 2px; font-size:12px; font-weight:600; color:${dark ? '#c7ccd4' : '#5f6368'}; }
+            .resource-monitor-panel .mon-box, .resource-monitor-panel .mon-trend { background:${cardBg}; border:1px solid ${cardBd}; border-radius:10px; padding:10px 12px; }
+            .resource-monitor-panel .mon-trend { margin-bottom:14px; }
+            .resource-monitor-panel .mon-spark { width:100%; height:54px; display:block; }
+            .resource-monitor-panel .mon-legend { font-size:11px; color:${sub}; margin-top:6px; }
+            .resource-monitor-panel .mon-note-inline { margin-left:6px; }
+            .resource-monitor-panel .mon-row { display:flex; justify-content:space-between; align-items:baseline; gap:12px; padding:3px 0; }
+            .resource-monitor-panel .mon-k { color:${sub}; font-size:12.5px; }
+            .resource-monitor-panel .mon-v { font-family:${mono}; font-weight:600; font-size:13px; text-align:right; white-space:nowrap; }
+            .resource-monitor-panel .mon-note { color:${sub}; font-size:11px; line-height:1.5; margin-top:6px; padding-top:6px; border-top:1px dashed ${cardBd}; }
+            .resource-monitor-panel .mon-copy { margin-top:6px; width:100%; padding:11px; border:none; border-radius:9px; background:linear-gradient(135deg,#1890ff,#0e6fd6); color:#fff; font-size:14px; font-weight:600; cursor:pointer; }
+            .resource-monitor-panel .mon-copy:hover { filter:brightness(1.06); }
         `;
         document.head.appendChild(style);
 
@@ -352,13 +380,18 @@ export const ResourceMonitor = {
      * 显示面板（启动 1s 采样）
      */
     showPanel() {
-        if (!this.panel) this.createMonitorPanel();
+        // 若面板未创建或曾因报错只创建未挂载（detached），重新创建，避免「点了打不开」
+        if (!this.panel || !document.body.contains(this.panel)) {
+            this.panel = null;
+            this.createMonitorPanel();
+        }
         this.panel.style.display = 'flex';
         this.isVisible = true;
-        this.sample();
-        this.render();
+        try { this.sample(); this.render(); } catch (e) { Logger.error('资源监控渲染失败:', e); }
         clearInterval(this.timer);
-        this.timer = setInterval(() => { this.sample(); this.render(); }, 1000);
+        this.timer = setInterval(() => {
+            try { this.sample(); this.render(); } catch (e) { Logger.error('资源监控采样失败:', e); }
+        }, 1000);
     },
 
     /**

@@ -1,6 +1,6 @@
 /**
  * 特别关心模块
- * 使用 chrome.storage.sync 存储，兼容 Chrome / Edge / 360极速 / QQ浏览器 / Firefox。
+ * 使用 chrome.storage.local 存储，兼容 Chrome / Edge / 360极速 / QQ浏览器 / Firefox。
  * 跨设备同步需要用户已登录浏览器账号并开启同步；未登录时数据保存在本地，
  * 但可解决 www.douyin.com 与 live.douyin.com 的 localStorage 隔离问题。
  *
@@ -15,17 +15,17 @@ const FavoriteManager = {
     _cache: [],
 
     /**
-     * 初始化：从 chrome.storage.sync 加载缓存，并监听跨标签/跨设备变更。
+     * 初始化：从 chrome.storage.local 加载缓存，并监听跨标签/跨设备变更。
      * 需在插件启动时 await 调用一次（content.js）。
      */
     async init() {
         // 从 storage.sync 加载
-        const result = await chrome.storage.sync.get(this.STORAGE_KEY);
+        const result = await chrome.storage.local.get(this.STORAGE_KEY);
         this._cache = result[this.STORAGE_KEY] || [];
 
         // 监听来自其他标签页或其他设备的变更，实时同步缓存
         chrome.storage.onChanged.addListener((changes, area) => {
-            if (area === 'sync' && changes[this.STORAGE_KEY]) {
+            if (area === 'local' && changes[this.STORAGE_KEY]) {
                 this._cache = changes[this.STORAGE_KEY].newValue || [];
             }
         });
@@ -46,7 +46,7 @@ const FavoriteManager = {
     addFavorite(secUid) {
         if (this._cache.includes(secUid)) return;
         this._cache = [...this._cache, secUid];
-        chrome.storage.sync.set({ [this.STORAGE_KEY]: this._cache });
+        chrome.storage.local.set({ [this.STORAGE_KEY]: this._cache });
     },
 
     /**
@@ -56,7 +56,7 @@ const FavoriteManager = {
     removeFavorite(secUid) {
         if (!this._cache.includes(secUid)) return;
         this._cache = this._cache.filter(id => id !== secUid);
-        chrome.storage.sync.set({ [this.STORAGE_KEY]: this._cache });
+        chrome.storage.local.set({ [this.STORAGE_KEY]: this._cache });
     },
 
     /**

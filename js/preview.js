@@ -8,7 +8,7 @@ import { Logger } from './logger.js';
 import { StyleUtils, SpeechUtils, NetworkUtils, TextUtils } from './utils.js';
 import { PreloadManager } from './preload.js';
 import { ToastManager } from './toast.js';
-import { TOAST } from './constants.js';
+import { TOAST, LIVE_QUALITY } from './constants.js';
 import { SettingsManager } from './settings.js';
 import { LicenseManager } from './license.js';
 import { AtmosphereManager } from './atmosphere.js';
@@ -649,10 +649,10 @@ wow，好热闹;
      * @param {string} highUrl - 蓝光流地址
      * @param {HTMLElement} previewContainer - 稳定全屏容器（冻结帧遮罩挂这里）
      */
-    _upgradeBigScreenQuality(videos, highUrl, previewContainer) {
+    _crossfadeBigScreenQuality(videos, highUrl, previewContainer) {
         const v0 = videos[0];
         if (!v0 || !window.Hls) return;
-        if (this.isRecording || videos.length !== 1) return; // 录制中/三联屏不升清
+        if (this.isRecording || videos.length !== 1) return; // 录制中/三联屏不切换
 
         let highHls;
         try { highHls = new Hls({ enableWorker: true, lowLatencyMode: true, backBufferLength: 0 }); }
@@ -741,6 +741,84 @@ wow，好热闹;
     },
 
     /**
+     * 大屏右下角「手动切清晰度」按钮：chip 显示当前档，点开列出可用档位，选则平滑交叉淡入切换。
+     * 录制中 / 三联屏开启时禁止切换。
+     * @param {HTMLVideoElement[]} videos - 大屏视频数组
+     * @param {HTMLElement} previewContainer - 大屏容器（存当前档位 _curQuality）
+     * @param {Object} live - 直播数据（streamUrlHlsMap）
+     * @returns {HTMLElement}
+     */
+    createQualityBtn(previewContainer, live) {
+        const map = (live && live.streamUrlHlsMap) || {};
+        const LABELS = { FULL_HD1: '蓝光', HD1: '超清', SD2: '高清', SD1: '标清' };
+        const avail = LIVE_QUALITY.ORDER.filter(q => map[q]);
+
+        // 当前清晰度 = 自适应实际落到的档位
+        let cur = NetworkUtils.getAppropriateQuality();
+        if (!map[cur]) cur = avail[0];
+        previewContainer._curQuality = cur;
+
+        // 与控制栏其它按钮同款外观，仅宽度自适应文字
+        const btn = document.createElement('div');
+        btn.setAttribute('title', '切换清晰度');
+        this.createCtrlBtnBaseStyle(btn);
+        Object.assign(btn.style, {
+            width: 'auto', minWidth: '46px', padding: '0 10px', color: '#fff',
+            fontSize: '13px', fontWeight: '600', position: 'relative'
+        });
+        if (avail.length <= 1) btn.style.display = 'none'; // 只有一档就不显示
+
+        const label = document.createElement('span');
+        const renderLabel = () => { label.textContent = LABELS[previewContainer._curQuality] || '清晰度'; };
+        renderLabel();
+
+        // 上弹菜单
+        const menu = document.createElement('div');
+        Object.assign(menu.style, {
+            position: 'absolute', right: '0', bottom: '40px', background: 'rgba(0,0,0,0.88)',
+            borderRadius: '6px', overflow: 'hidden', display: 'none', minWidth: '72px',
+            boxShadow: '0 2px 10px rgba(0,0,0,0.4)'
+        });
+        const buildMenu = () => {
+            menu.innerHTML = '';
+            avail.forEach(q => {
+                const item = document.createElement('div');
+                item.textContent = LABELS[q] || q;
+                Object.assign(item.style, {
+                    padding: '8px 14px', color: q === previewContainer._curQuality ? '#ff2c55' : '#fff',
+                    fontSize: '13px', cursor: 'pointer', whiteSpace: 'nowrap', textAlign: 'center'
+                });
+                item.addEventListener('mouseenter', () => { item.style.background = 'rgba(255,255,255,0.14)'; });
+                item.addEventListener('mouseleave', () => { item.style.background = 'transparent'; });
+                item.onclick = (e) => {
+                    e.stopPropagation();
+                    menu.style.display = 'none';
+                    if (q === previewContainer._curQuality) return;
+                    if (this.isRecording) { ToastManager.show('录制中不可切换清晰度', TOAST.TYPE.ERROR); return; }
+                    const videos = previewContainer._videos || [];
+                    if (videos.length !== 1) { ToastManager.show('三联屏下不可切换清晰度', TOAST.TYPE.ERROR); return; }
+                    previewContainer._curQuality = q;
+                    renderLabel();
+                    this._crossfadeBigScreenQuality(videos, map[q], previewContainer);
+                };
+                menu.appendChild(item);
+            });
+        };
+
+        btn.onclick = (e) => {
+            e.stopPropagation();
+            if (menu.style.display === 'none') { buildMenu(); menu.style.display = 'block'; }
+            else menu.style.display = 'none';
+        };
+        // 点别处收起菜单
+        previewContainer.addEventListener('click', () => { menu.style.display = 'none'; });
+
+        btn.appendChild(label);
+        btn.appendChild(menu);
+        return btn;
+    },
+
+    /**
      * 添加大屏预览方法
      * @param {HTMLElement} cardPreview - 卡片预览元素
      * @param {Object} live - 直播数据
@@ -753,12 +831,8 @@ wow，好热闹;
         PreloadManager.resumeLoading('hover');
         // 注：只暂停「启动新的片段加载」，不暂停整墙循环播放（暂停播放体验差）
 
-        // 复用悬浮中的实时流（低清，已在播）→ 点开瞬间出画面。收养后置空 this.videoElement/this.hls，
-        // 避免随后 mouseleave 的 clearPreview 把它们销毁。
-        const adoptedVideo = this.videoElement;
-        const adoptedHls = this.hls;
-        const canReuse = !!(adoptedVideo && adoptedHls && adoptedVideo.readyState >= 2 && !adoptedVideo.paused);
-        if (canReuse) { this.videoElement = null; this.hls = null; }
+        // 不复用悬浮流：若有悬浮预览在播，先释放（大屏直接请求自适应清晰度，1~2s 出画面）
+        if (this.videoElement || this.hls) { try { this.cleanupResources(); } catch (_) {} }
 
         // 占位封面元素（首帧到达后移除）
         let placeholderEl = null;
@@ -863,26 +937,13 @@ wow，好热闹;
             return hls;
         };
 
-        // 初始化第一个视频：能复用悬浮流就直接搬过来（瞬间出画面），否则新建
+        // 初始化第一个视频（新建，直接请求自适应清晰度）
         const vc0 = _makeVideoContainer();
-        let v0;
-        if (canReuse) {
-            v0 = adoptedVideo;
-            // 从小卡样式恢复成大屏样式（去掉悬浮时的绝对定位/裁剪）
-            Object.assign(v0.style, {
-                height: '100%', width: 'auto', objectFit: 'contain',
-                position: 'static', top: '', left: '', transform: '', opacity: '1', zIndex: ''
-            });
-            v0.muted = !globalSoundEnabled;
-            v0.volume = globalSoundEnabled ? savedVolume : 0;
-            v0.disablePictureInPicture = true;
-        } else {
-            v0 = _makeVideo(0);
-        }
-        vc0.appendChild(v0); // appendChild 会把复用的视频从小卡移入大屏
+        const v0 = _makeVideo(0);
+        vc0.appendChild(v0);
         videoContainers.push(vc0);
         videos.push(v0);
-        this.currentBigVideo = v0; // 控制条动态指向的「当前主视频」，升清交叉淡入后会更新
+        this.currentBigVideo = v0; // 控制条动态指向的「当前主视频」，手动切清晰度后会更新
 
         // 将视频容器挂入视频组容器
         videoContainers.forEach(container => {
@@ -897,7 +958,7 @@ wow，好热闹;
         let textInterval;
 
         // 2. 创建控制按钮（包括退出大屏按钮），传入 previewContainer
-        const controls = this.createControls(cardPreview, videos[0], timerInterval, textInterval, previewContainer);
+        const controls = this.createControls(cardPreview, videos[0], timerInterval, textInterval, previewContainer, live);
         previewContainer.appendChild(controls);
         // 初始隐藏（visibility:hidden + pointerEvents:none），由鼠标移动控制显隐
 
@@ -1017,6 +1078,8 @@ wow，好热闹;
             try { PreloadManager.resumeLoading('fullscreen'); } catch (_) {}
             modal.remove();
         };
+        // 暴露给控制栏退出按钮，三条关闭路径（ESC/遮罩/退出按钮）统一走完整清理
+        previewContainer._closeBig = cleanupHandler;
 
         // ESC 关闭大屏（捕获阶段，确保一定能收到；浏览器全屏时 ESC 由浏览器处理，不触发关闭）
         const handleEscKey = (e) => {
@@ -1028,11 +1091,9 @@ wow，好热闹;
         };
         document.addEventListener('keydown', handleEscKey, true);
 
-        // 低清秒开、蓝光后台升级（复用悬浮流时首帧已在播）。三联屏复用 videos[0]
-        const lowUrl = NetworkUtils.getLowestQualityUrl(live.streamUrlHlsMap);
-        const highUrl = this.getStreamUrl(live.streamUrlHlsMap);
-        const firstUrl = canReuse ? null : (lowUrl || highUrl); // 复用时无需再取流
-        if (!canReuse && !firstUrl) {
+        // 大屏直接请求**自适应清晰度**（打开时已暂停其它加载、带宽充足）；右下角可手动切换
+        const streamUrl = this.getStreamUrl(live.streamUrlHlsMap);
+        if (!streamUrl) {
             cleanupHandler(); // 取不到流：静默关掉空大屏并恢复整墙（不弹失败提示）
             return;
         }
@@ -1043,33 +1104,20 @@ wow，好热闹;
         };
 
         if (Hls.isSupported()) {
-            if (canReuse) {
-                // 复用悬浮的低清实例（已在播）：直接接管，隐藏加载层
-                this.fullPreviewHlsInstances = [adoptedHls];
-                loadingOverlay.style.display = 'none';
-                if (placeholderEl) { placeholderEl.remove(); placeholderEl = null; }
-                videos[0].play().catch(() => {});
-            } else {
-                const hls0 = _makeHls(firstUrl, videos[0]);
-                this.fullPreviewHlsInstances = [hls0];
-                hls0.on(Hls.Events.MANIFEST_PARSED, () => {
-                    videos.forEach(video => {
-                        video.play().catch(err => {
-                            if (err.name !== 'AbortError') Logger.error('大屏播放失败:', err);
-                        });
+            const hls0 = _makeHls(streamUrl, videos[0]);
+            this.fullPreviewHlsInstances = [hls0];
+            hls0.on(Hls.Events.MANIFEST_PARSED, () => {
+                videos.forEach(video => {
+                    video.play().catch(err => {
+                        if (err.name !== 'AbortError') Logger.error('大屏播放失败:', err);
                     });
                 });
-                hls0.on(Hls.Events.ERROR, (event, data) => {
-                    if (data.fatal) showLoadFail();
-                });
-            }
-
-            // 渐进升清：低清/复用流先顶着，后台拉蓝光，无缝替换到同一个 videos[0]
-            if (highUrl && highUrl !== firstUrl) {
-                this._upgradeBigScreenQuality(videos, highUrl, previewContainer);
-            }
+            });
+            hls0.on(Hls.Events.ERROR, (event, data) => {
+                if (data.fatal) showLoadFail();
+            });
         } else if (videos[0].canPlayType('application/vnd.apple.mpegurl')) {
-            videos[0].src = firstUrl || highUrl;
+            videos[0].src = streamUrl;
             videos[0].play().catch(err => {
                 if (err.name !== 'AbortError') Logger.error('大屏播放失败canPlayType:', err);
             });
@@ -1686,7 +1734,7 @@ wow，好热闹;
      * @param {*} previewContainer 容器
      * @returns 控制按钮容器
      */
-    createControls(cardPreview, video, timerInterval = null, textInterval = null, previewContainer) {
+    createControls(cardPreview, video, timerInterval = null, textInterval = null, previewContainer, live = null) {
 
         // 创建控制按钮容器
         const controlContainer = this.createControlContainer();
@@ -1731,9 +1779,10 @@ wow，好热闹;
         // 添加录制按钮
         const recordBtn = this.createRecordBtn(previewContainer, video);
         // 添加退出大屏按钮
-        const exitFullscreenBtn = this.createExitFullscreenBtn(cardPreview, video, timerInterval, textInterval);
+        const exitFullscreenBtn = this.createExitFullscreenBtn(cardPreview, video, timerInterval, textInterval, previewContainer);
 
-        // 将按钮添加到控制按钮容器
+        // 将按钮添加到控制按钮容器（清晰度按钮放在声音按钮左边）
+        if (live) controlContainer.appendChild(this.createQualityBtn(previewContainer, live));
         controlContainer.appendChild(volumeBtn);
         controlContainer.appendChild(fullscreenBtn);
         controlContainer.appendChild(tripleScreenBtn);
@@ -2606,7 +2655,7 @@ wow，好热闹;
      * @param {number} textInterval - 文本定时器ID
      * @returns {HTMLElement} 退出大屏按钮
      */
-    createExitFullscreenBtn(cardPreview, video, timerInterval, textInterval) {
+    createExitFullscreenBtn(cardPreview, video, timerInterval, textInterval, previewContainer) {
         // 添加退出大屏按钮
         const exitFullscreenBtn = document.createElement('div');
         exitFullscreenBtn.setAttribute('title', '退出大屏预览');
@@ -2620,34 +2669,19 @@ wow，好热闹;
         `;
         exitFullscreenBtn.onclick = async (e) => {
             e.preventDefault();
-            const modal = document.getElementById(this.modalId);
-            if (modal) {
-
-                // 清理所有定时器
-                if (timerInterval) {
-                    clearInterval(timerInterval);
-                }
-                if (textInterval) {
-                    clearInterval(textInterval);
-                }
-                if (this.currentTextInterval) {
-                    clearInterval(this.currentTextInterval);
-                    this.currentTextInterval = null;
-                }
-
-                // 还原氛围词条配置
-                this.currentEtmosphereEntryConfig.currentEntryIndex = 0;
-
-                // 停止播放和清理视频元素，清理HLS实例
-                this.cleanupResources();
-
-                // 移除模态框
-                modal.remove();
-
-                // 执行移出预览区域的逻辑（动态取当前主视频，升清后抓的是蓝光帧）
-                if (cardPreview) {
-                    this.clearPreview(cardPreview, this.currentLive, this.currentBigVideo || video, document.querySelector('.dy-loading'));
-                }
+            // 还原氛围词条配置
+            this.currentEtmosphereEntryConfig.currentEntryIndex = 0;
+            // 统一走 openFullPreview 的完整 cleanupHandler（含 resumeLoading/currentBigVideo/syncInterval/ESC 等）
+            if (previewContainer && previewContainer._closeBig) {
+                previewContainer._closeBig();
+            } else {
+                // 兜底：旧逻辑
+                const modal = document.getElementById(this.modalId);
+                if (modal) { try { this.cleanupResources(); } catch (_) {} modal.remove(); }
+            }
+            // 卡片侧：抓帧当封面（动态取当前主视频，升清后抓的是蓝光帧）
+            if (cardPreview) {
+                this.clearPreview(cardPreview, this.currentLive, this.currentBigVideo || video, document.querySelector('.dy-loading'));
             }
         };
         return exitFullscreenBtn;

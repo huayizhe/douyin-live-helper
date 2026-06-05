@@ -1,6 +1,6 @@
 /**
  * 全局设置模块
- * 存储音量大小、声音总开关，使用 chrome.storage.sync（与 FavoriteManager 同款方案）。
+ * 存储音量大小、声音总开关，使用 chrome.storage.local（与 FavoriteManager 同款方案）。
  * 读操作从内存缓存（_cache）同步返回，写操作异步持久化，跨 www/live 子域与设备同步。
  */
 
@@ -19,7 +19,7 @@ const SettingsManager = {
      */
     async init() {
         // 从 storage.sync 加载（已有则覆盖默认值）
-        const result = await chrome.storage.sync.get(this.STORAGE_KEY);
+        const result = await chrome.storage.local.get(this.STORAGE_KEY);
         const stored = result[this.STORAGE_KEY];
         if (stored && typeof stored === 'object') {
             this._cache = { ...this._cache, ...stored };
@@ -27,7 +27,7 @@ const SettingsManager = {
 
         // 监听跨标签/跨设备变更
         chrome.storage.onChanged.addListener((changes, area) => {
-            if (area === 'sync' && changes[this.STORAGE_KEY]) {
+            if (area === 'local' && changes[this.STORAGE_KEY]) {
                 const nv = changes[this.STORAGE_KEY].newValue;
                 if (nv && typeof nv === 'object') {
                     this._cache = { ...this._cache, ...nv };
@@ -59,7 +59,7 @@ const SettingsManager = {
     },
 
     _persist() {
-        chrome.storage.sync.set({ [this.STORAGE_KEY]: this._cache });
+        chrome.storage.local.set({ [this.STORAGE_KEY]: this._cache });
     }
 };
 
