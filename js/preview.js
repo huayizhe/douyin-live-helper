@@ -6,6 +6,7 @@
 
 import { Logger } from './logger.js';
 import { StyleUtils, SpeechUtils, NetworkUtils, TextUtils } from './utils.js';
+import { PreloadManager } from './preload.js';
 import { ToastManager } from './toast.js';
 import { TOAST } from './constants.js';
 import { SettingsManager } from './settings.js';
@@ -14,6 +15,9 @@ import { AtmosphereManager } from './atmosphere.js';
 
 // 确保 HLS.js 可用
 const HLS = window.Hls;
+
+// 「已预览」角标开关：自动循环预览上线后已冗余，默认隐藏（代码保留，置 true 可恢复）
+const SHOW_PREVIEW_BADGE = false;
 
 /**
  * 预览处理器
@@ -192,6 +196,7 @@ wow，好热闹;
                 width: 48px;
                 height: 48px;
                 display: none;
+                z-index: 6;
             ">
                 <svg viewBox="0 0 48 48" xmlns="http://www.w3.org/2000/svg">
                     <circle cx="24" cy="24" r="20" fill="none" stroke="#666" stroke-width="4" stroke-dasharray="80,80" stroke-dashoffset="0">
@@ -213,20 +218,25 @@ wow，好热闹;
         cardPreview.addEventListener('mouseenter', () => {
             isHovering = true;
             Logger.log('开始预览:', live.anchor);
-            
-            // 延迟加载直播流
+
+            // 悬浮即暂停循环片段，改播这一路的真·实时流（最新画面 + 可出声）
+            PreloadManager.pauseCard(cardPreview);
+
+            // 短延迟防快速划过误加载
             this.previewTimer = setTimeout(() => {
                 if (isHovering && live.streamUrlHlsMap) {
                     loadingEl.style.display = 'block';
                     this.startStreamPreview(cardPreview, live, loadingEl);
                 }
-            }, 800);
+            }, 200);
         });
 
         cardPreview.addEventListener('mouseleave', () => {
             isHovering = false;
             Logger.log('结束预览:', live.anchor);
             this.clearPreview(cardPreview, live, this.videoElement, loadingEl);
+            // 恢复循环片段
+            PreloadManager.resumeCard(cardPreview);
         });
     },
 
@@ -250,7 +260,14 @@ wow，好热闹;
                 transform: 'translate(-50%, -50%)',
                 opacity: 0,
                 transition: 'opacity 0.3s',
-                backgroundColor: '#000'
+                zIndex: '1'  // 叠在循环片段(0)之上、信息条/序号/复选框等覆盖层之下
+            });
+
+            // 拿到真实宽高比后按横竖屏渲染（竖屏铺满 / 横屏完整居中+模糊填充）
+            this.videoElement.addEventListener('loadedmetadata', () => {
+                if (!this.videoElement) return;
+                const aspect = this.videoElement.videoWidth / this.videoElement.videoHeight;
+                StyleUtils.applyMediaOrientation(cardPreview, this.videoElement, StyleUtils.isLandscapeRatio(aspect));
             });
 
             const streamUrl = this.getStreamUrl(live.streamUrlHlsMap);
@@ -539,7 +556,7 @@ wow，好热闹;
                 });
 
                 // 添加已预览标记（左下角，避开右上角的对比复选框；去重避免叠加）
-                if (!cardPreview.querySelector('.preview-badge')) {
+                if (SHOW_PREVIEW_BADGE && !cardPreview.querySelector('.preview-badge')) {
                     const badge = document.createElement('div');
                     badge.className = 'preview-badge';
                     badge.innerHTML = '已预览';

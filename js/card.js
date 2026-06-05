@@ -5,8 +5,10 @@
 import { Logger } from './logger.js';
 import { DOMUtils } from './utils.js';
 import { PreviewManager } from './preview.js';
-import { PreloadManager } from './preload.js';
 import { FavoriteManager } from './favorite.js';
+
+// 「已预览」角标开关：自动循环预览上线后该角标已冗余，默认隐藏（代码保留，置 true 可恢复）
+const SHOW_PREVIEW_BADGE = false;
 
 const LiveCard = {
     /**
@@ -20,8 +22,7 @@ const LiveCard = {
         const card = DOMUtils.createElement('div', {
             className: 'live-card',
             styles: {
-                width: '300px',
-                margin: '0 auto',
+                width: '100%',
                 borderRadius: '8px',
                 overflow: 'hidden',
                 boxShadow: '0 2px 8px rgba(0,0,0,0.1)',
@@ -51,40 +52,47 @@ const LiveCard = {
         // 确保序号从 1 开始显示
         const displayIndex = (index || 0) + 1;
 
-        // 背景图：优先用上次预览的截图（命中则在左下角加"已预览"标志）
+        // 背景图：优先用上次预览的截图作为片段加载前的封面占位
         const captured = live.capturedPreview || PreviewManager.previewCache.get(live.roomUrl);
         const bgImage = captured || live.cover;
-        const previewBadge = captured ? `
+        // 「已预览」角标默认隐藏（与自动循环预览冲突，代码保留由 SHOW_PREVIEW_BADGE 控制）
+        const previewBadge = (SHOW_PREVIEW_BADGE && captured) ? `
                 <div class="preview-badge" style="
                     position: absolute;
-                    bottom: 8px;
+                    bottom: 60px;
                     left: 8px;
                     background: rgba(0, 0, 0, 0.8);
                     color: #fff;
                     padding: 4px 8px;
                     border-radius: 4px;
                     font-size: 12px;
-                    z-index: 1;
+                    z-index: 4;
                 ">已预览</div>` : '';
 
+        const isFav = FavoriteManager.isFavorite(live.secUid);
+
+        // 全沉浸卡片：整张卡=视频区(3:4)，信息条压在视频底部、白字 + 淡渐变蒙版
         return `
             <div class="live-preview" style="
-                height: 200px;
+                position: relative;
+                width: 100%;
+                aspect-ratio: 3 / 4;
                 background-image: url(${bgImage});
                 background-size: cover;
-                position: relative;
+                background-position: center;
+                overflow: hidden;
                 cursor: pointer;
             ">
                 <div class="live-index" style="
                     position: absolute;
                     top: 8px;
                     left: 8px;
-                    background: rgba(0, 0, 0, 0.7);
+                    background: rgba(0, 0, 0, 0.55);
                     color: #fff;
                     padding: 2px 8px;
                     border-radius: 4px;
                     font-size: 12px;
-                    z-index: 1;
+                    z-index: 4;
                 ">${displayIndex}</div>
                 ${previewBadge}
                 <div class="compare-hit" title="勾选加入对比预览" style="
@@ -95,7 +103,7 @@ const LiveCard = {
                     height: 44px;
                     padding: 8px;
                     box-sizing: border-box;
-                    z-index: 2;
+                    z-index: 5;
                     cursor: pointer;
                     display: flex;
                     align-items: flex-start;
@@ -113,74 +121,78 @@ const LiveCard = {
                         box-sizing: border-box;
                     "></div>
                 </div>
-            </div>
-            <div class="live-info" style="padding: 8px 8px 0 8px;">
-                <div class="user-info" style="
+
+                <div class="card-info-bar" style="
+                    position: absolute;
+                    left: 0;
+                    right: 0;
+                    bottom: 0;
+                    z-index: 3;
+                    padding: 28px 10px 10px 10px;
+                    background: linear-gradient(transparent, rgba(0,0,0,0.3));
                     display: flex;
-                    align-items: flex-start;
-                    width: 100%;
+                    align-items: flex-end;
+                    gap: 8px;
+                    pointer-events: none;
                 ">
                     <img src="${live.avatar}" class="user-avatar" title="点击跳转个人主页" style="
-                        width: 36px;
-                        height: 36px;
+                        width: 32px;
+                        height: 32px;
                         border-radius: 50%;
-                        margin-right: 8px;
-                        cursor: pointer;
                         flex-shrink: 0;
+                        cursor: pointer;
+                        pointer-events: auto;
                     ">
-                    <div class="text-info" style="
-                        flex: 6;
-                        min-width: 0;
-                        width: 0;
-                    ">
-                        <div style="
-                            display: flex;
-                            justify-content: space-between;
-                            align-items: center;
-                            margin-bottom: 4px;
-                        ">
-                            <div style="
-                                font-weight: bold;
-                                color: ${isDarkMode ? '#fff' : '#000'};
-                                font-size: 14px;
-                                line-height: 1.2;
-                                overflow: hidden;
-                                text-overflow: ellipsis;
-                                white-space: nowrap;
-                                cursor: default;
-                                flex: 1;
-                                min-width: 0;
-                            " title="点击跳转直播间&#10;${live.title}">${live.title}</div>
-                            <div class="favorite-btn" style="
-                                width: 24px;
-                                height: 24px;
-                                margin-left: 8px;
-                                cursor: pointer;
-                                display: flex;
-                                justify-content: center;
-                                align-items: center;
-                                flex-shrink: 0;
-                            " title="${FavoriteManager.isFavorite(live.secUid) ? '点击取消特别关注主播' : '点击特别关心主播'}">
-                                <svg width="20" height="20" viewBox="0 0 24 24" fill="${FavoriteManager.isFavorite(live.secUid) ? '#ff2c55' : 'none'}" stroke="${isDarkMode ? '#fff' : '#666'}" stroke-width="2">
-                                    <path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"/>
-                                </svg>
-                            </div>
-                        </div>
+                    <div class="text-info" style="flex: 1; min-width: 0;">
+                        <div class="title-text" title="点击跳转直播间&#10;${live.title}" style="
+                            color: #fff;
+                            font-weight: bold;
+                            font-size: 13px;
+                            line-height: 1.25;
+                            overflow: hidden;
+                            text-overflow: ellipsis;
+                            white-space: nowrap;
+                            cursor: pointer;
+                            pointer-events: auto;
+                            text-shadow: 0 1px 2px rgba(0,0,0,0.6);
+                        ">${live.title}</div>
                         <div class="bottom-info" style="
                             display: flex;
                             align-items: center;
                             justify-content: space-between;
-                            cursor: default;
+                            gap: 6px;
+                            margin-top: 2px;
                         ">
                             <span class="username" style="
                                 color: #fff;
                                 font-size: 12px;
-                            ">${live.anchor}</span>
+                                overflow: hidden;
+                                text-overflow: ellipsis;
+                                white-space: nowrap;
+                                min-width: 0;
+                                text-shadow: 0 1px 2px rgba(0,0,0,0.6);
+                            ">@${live.anchor}</span>
                             <span class="viewer-count" style="
-                                color: #999;
-                                font-size: 12px;
+                                color: #fff;
+                                font-size: 11px;
+                                flex-shrink: 0;
+                                text-shadow: 0 1px 2px rgba(0,0,0,0.6);
                             ">${live.user_count_str}在线观众</span>
                         </div>
+                    </div>
+                    <div class="favorite-btn" style="
+                        width: 26px;
+                        height: 26px;
+                        cursor: pointer;
+                        display: flex;
+                        justify-content: center;
+                        align-items: center;
+                        flex-shrink: 0;
+                        pointer-events: auto;
+                    " title="${isFav ? '点击取消特别关注主播' : '点击特别关心主播'}">
+                        <svg width="22" height="22" viewBox="0 0 24 24" fill="${isFav ? '#ff2c55' : 'none'}" stroke="#fff" stroke-width="2">
+                            <path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"/>
+                        </svg>
                     </div>
                 </div>
             </div>
@@ -207,9 +219,8 @@ const LiveCard = {
         cardPreview.style.backgroundPosition = 'center';
         cardPreview.style.position = 'relative';
 
-        // 悬浮给该路循环片段取消静音（沿用全局声音设置），移出恢复静音
-        cardPreview.addEventListener('mouseenter', () => PreloadManager.unmuteCard(cardPreview));
-        cardPreview.addEventListener('mouseleave', () => PreloadManager.muteCard(cardPreview));
+        // 悬浮：暂停循环片段、切这一路真·实时流（在 setupPreview 内处理 pause/resume）
+        PreviewManager.setupPreview(cardPreview, live);
     },
 
     /**
@@ -227,12 +238,14 @@ const LiveCard = {
         };
 
         // 标题点击跳转直播间
-        const title = card.querySelector('.text-info > div > div[title]');
-        title.onclick = (e) => {
-            e.stopPropagation();
-            window.open(live.roomUrl, '_blank');
-        };
-        title.style.cursor = 'pointer';
+        const title = card.querySelector('.title-text');
+        if (title) {
+            title.onclick = (e) => {
+                e.stopPropagation();
+                window.open(live.roomUrl, '_blank');
+            };
+            title.style.cursor = 'pointer';
+        }
 
         // 头像点击跳转主页
         const avatar = card.querySelector('.user-avatar');

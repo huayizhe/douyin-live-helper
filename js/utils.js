@@ -102,6 +102,43 @@ const StyleUtils = {
     getThemeColor(options) {
         const isDark = this.isDarkMode();
         return isDark ? options.dark : options.light;
+    },
+
+    /**
+     * 判断是否横屏（宽高比 > 1.2 视为横屏）
+     * @param {number} aspect - videoWidth/videoHeight
+     * @returns {boolean}
+     */
+    isLandscapeRatio(aspect) {
+        return !!aspect && aspect > 1.2;
+    },
+
+    /**
+     * 按横竖屏渲染视频：竖屏铺满(cover)；横屏完整居中(contain) + 上下用同一帧放大模糊填充。
+     * 模糊层取 containerEl 当前的 background-image（封面/抓帧），不额外开第二个视频解码。
+     * @param {HTMLElement} containerEl - 视频所在的卡片预览容器（position:relative）
+     * @param {HTMLVideoElement} videoEl - 要渲染的视频元素
+     * @param {boolean} isLandscape - 是否横屏
+     */
+    applyMediaOrientation(containerEl, videoEl, isLandscape) {
+        videoEl.style.objectFit = isLandscape ? 'contain' : 'cover';
+
+        let blur = containerEl.querySelector(':scope > .dy-media-blur');
+        if (isLandscape) {
+            if (!blur) {
+                blur = document.createElement('div');
+                blur.className = 'dy-media-blur';
+                Object.assign(blur.style, {
+                    position: 'absolute', top: '0', left: '0', width: '100%', height: '100%',
+                    zIndex: '0', backgroundSize: 'cover', backgroundPosition: 'center',
+                    filter: 'blur(24px)', transform: 'scale(1.15)', pointerEvents: 'none'
+                });
+                containerEl.insertBefore(blur, containerEl.firstChild);
+            }
+            blur.style.backgroundImage = containerEl.style.backgroundImage;
+        } else if (blur) {
+            blur.remove();
+        }
     }
 };
 
