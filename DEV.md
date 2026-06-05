@@ -148,6 +148,7 @@ douyinfollowplugin/
 
 4. 改动须知
    - 修改 `license.js` / `constants.js` 等源码后，必须 `npm run build` 才会进 `dist/`。
+   - ⚠️ **改完一律用 `npm run release`（= build + sync），不要只 `npm run build`**。`npm run build` 只输出到根目录 `dist/`，**不会**更新发布包 `douyin_live_helper_plugin/`。若加载的是发布包目录，只 build 不 sync 会出现「重新加载插件却没生效」——因为发布包里的 `dist/content.js`、`css/style.css` 还是旧的。只改了 JS/CSS、想跳过重复构建时可单独 `npm run sync`。
    - 价格、客服微信、购买链接在 `constants.js` 的 `LICENSE` 常量配置。
    - **在线订阅支付**：`server/`（Node+Express）下单 → 弹二维码 → 支付回调/轮询 → 用同一私钥签发授权 → 插件自动激活。支付层适配器 `server/pay/{alipay,wechat,mock}.js`，加/换渠道不动业务。插件端 `license.js` 的 `createOrder/pollOrder/rebindToThisDevice` 对接；配置 `constants.js` 的 `SERVER` 与 `manifest.json` 域名。详见 `docs/服务器部署手册.md`。
 
