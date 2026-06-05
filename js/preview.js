@@ -152,14 +152,29 @@ wow，好热闹;
     // 大屏预览容器 id
     previewContainerId: 'dy-preview-container',
 
-    // 存储所有预加载的实例
-    hlsInstances: new Map(), // Map<string, {hls: Hls, lastAccess: number}>
-
     // 大屏预览创建的 HLS 实例（用于退出时统一销毁）
     fullPreviewHlsInstances: [],
 
     // 多路对比预览创建的 HLS 实例（独立于大屏预览）
     compareHlsInstances: [],
+
+    /**
+     * 资源监控用：返回各来源的 HLS 实例数与截图缓存占用。
+     * （片段加载中的 HLS 在 PreloadManager.activeLoads，监控里另算）
+     */
+    getHlsStats() {
+        let previewBytes = 0;
+        for (const d of this.previewCache.values()) {
+            if (typeof d === 'string') previewBytes += d.length;
+        }
+        return {
+            hover: this.hls ? 1 : 0,
+            full: this.fullPreviewHlsInstances.length,
+            compare: this.compareHlsInstances.length,
+            previewCacheCount: this.previewCache.size,
+            previewCacheBytes: Math.round(previewBytes * 0.75) // dataURL base64 → 实际字节约 ×0.75
+        };
+    },
 
     /**
      * 获取直播流地址的工具方法
@@ -221,6 +236,8 @@ wow，好热闹;
 
             // 悬浮即暂停循环片段，改播这一路的真·实时流（最新画面 + 可出声）
             PreloadManager.pauseCard(cardPreview);
+            // A：用户停滚专注这一路，暂停启动新的片段预加载，带宽/CPU 让给实时流
+            PreloadManager.pauseLoading('hover');
 
             // 短延迟防快速划过误加载
             this.previewTimer = setTimeout(() => {
@@ -235,8 +252,9 @@ wow，好热闹;
             isHovering = false;
             Logger.log('结束预览:', live.anchor);
             this.clearPreview(cardPreview, live, this.videoElement, loadingEl);
-            // 恢复循环片段
+            // 恢复循环片段与片段预加载
             PreloadManager.resumeCard(cardPreview);
+            PreloadManager.resumeLoading('hover');
         });
     },
 
@@ -273,8 +291,7 @@ wow，好热闹;
             const streamUrl = this.getStreamUrl(live.streamUrlHlsMap);
             if (!streamUrl) {
                 loadingEl.style.display = 'none';
-                ToastManager.show('无法加载直播预览', 'error');
-                return;
+                return; // 取不到流：静默回落到循环片段/封面（不弹失败提示）
             }
 
             // 根据全局声音总开关决定是否静音
@@ -304,13 +321,6 @@ wow，好热闹;
                         maxRetries: 3,
                         retryDelay: 1000
                     }
-                });
-
-                // 将实例添加到管理中
-                this.hlsInstances.set(live.secUid, {
-                    hls: this.hls,
-                    video: this.videoElement,
-                    lastAccess: Date.now()
                 });
 
                 // 添加错误处理
@@ -525,11 +535,6 @@ wow，好热闹;
      * @param {HTMLElement} loadingEl - 加载动画元素
      */
     clearPreview(cardPreview, live, videoElement, loadingEl) {
-        // 更新最后访问时间
-        const instance = this.hlsInstances.get(live.secUid);
-        if (instance) {
-            instance.lastAccess = Date.now();
-        }
 
         // 清除定时器
         if (this.previewTimer) {
@@ -600,19 +605,139 @@ wow，好热闹;
      * @param {string} message - 错误消息
      */
     showPlaybackError(cardPreview, message = '预览加载失败') {
-        // 非破坏性：用 appendChild 而非 innerHTML +=，避免重建子节点（会丢失对比复选框等已绑定的监听）
-        let el = cardPreview.querySelector(`#${this.previewErrorId}`);
-        if (!el) {
-            el = document.createElement('div');
-            el.id = this.previewErrorId;
-            Object.assign(el.style, {
-                position: 'absolute', bottom: '10px', left: '10px', right: '10px',
-                background: 'rgba(0,0,0,0.7)', color: '#fff', padding: '8px',
-                borderRadius: '4px', textAlign: 'center'
-            });
-            cardPreview.appendChild(el);
+        // 按需求：不再显示「播放失败/加载失败」提示，静默回落到封面/循环片段
+    },
+
+    /**
+     * 抓取视频当前帧做成覆盖层，用于升清切换时遮住黑屏空档。跨域污染则回退到模糊封面/截图。
+     * 遮罩挂到**稳定全屏的 host（previewContainer）**而非会随视频塌缩的 vc0，避免「从小到大」闪缩。
+     * @param {HTMLVideoElement} v0 - 主画面视频
+     * @param {HTMLElement} host - 稳定的全屏容器（previewContainer）
+     * @returns {HTMLElement|null}
+     */
+    _makeFreezeMask(v0, host) {
+        let dataUrl = null;
+        try {
+            if (v0.videoWidth && v0.videoHeight) {
+                const c = document.createElement('canvas');
+                c.width = v0.videoWidth;
+                c.height = v0.videoHeight;
+                c.getContext('2d').drawImage(v0, 0, 0);
+                dataUrl = c.toDataURL('image/jpeg', 0.85);
+            }
+        } catch (_) { dataUrl = null; } // 跨域污染
+        if (!dataUrl) {
+            const live = this.currentLive;
+            dataUrl = (live && (live.capturedPreview || live.cover)) || null;
         }
-        el.textContent = message;
+        if (!dataUrl || !host) return null;
+        const mask = document.createElement('div');
+        Object.assign(mask.style, {
+            position: 'absolute', top: '0', left: '0', width: '100%', height: '100%',
+            backgroundImage: `url(${dataUrl})`,
+            backgroundSize: 'contain', backgroundPosition: 'center', backgroundRepeat: 'no-repeat',
+            opacity: '1', transition: 'opacity 0.4s ease', zIndex: '1', pointerEvents: 'none'
+        });
+        host.appendChild(mask);
+        return mask;
+    },
+
+    /**
+     * 大屏渐进升清：后台用临时 video 预拉蓝光，就绪后无缝替换到同一个 videos[0]（不换 DOM 元素）。
+     * 三联屏/对比已加视频（videos 增多）则跳过，保活 captureStream 镜像。全程 best-effort，失败则维持低清。
+     * @param {HTMLVideoElement[]} videos - 大屏视频数组（videos[0] 为主画面）
+     * @param {string} highUrl - 蓝光流地址
+     * @param {HTMLElement} previewContainer - 稳定全屏容器（冻结帧遮罩挂这里）
+     */
+    _upgradeBigScreenQuality(videos, highUrl, previewContainer) {
+        const v0 = videos[0];
+        if (!v0 || !window.Hls) return;
+        if (this.isRecording || videos.length !== 1) return; // 录制中/三联屏不升清
+
+        let highHls;
+        try { highHls = new Hls({ enableWorker: true, lowLatencyMode: true, backBufferLength: 0 }); }
+        catch (_) { return; }
+        this.fullPreviewHlsInstances.push(highHls);
+        const drop = () => { this.fullPreviewHlsInstances = this.fullPreviewHlsInstances.filter(h => h !== highHls); };
+
+        // 蓝光在独立可见视频上预缓冲，叠在 v0 上、初始透明
+        const vc0 = v0.parentElement;
+        const vHigh = document.createElement('video');
+        vHigh.muted = true; vHigh.playsInline = true; vHigh.autoplay = true;
+        vHigh.disablePictureInPicture = true;
+        vHigh.oncontextmenu = (e) => e.preventDefault();
+        Object.assign(vHigh.style, {
+            position: 'absolute', top: '0', left: '0', width: '100%', height: '100%',
+            objectFit: 'contain', opacity: '0', zIndex: '1'
+        });
+        if (vc0) {
+            if (getComputedStyle(vc0).position === 'static') vc0.style.position = 'relative';
+            vc0.appendChild(vHigh);
+        }
+
+        const FADE_MS = 1500;
+        let started = false, failed = false;
+
+        const fail = () => {
+            failed = true;
+            try { highHls.destroy(); } catch (_) {}
+            try { vHigh.remove(); } catch (_) {}
+            drop();
+        };
+
+        const finish = (targetMuted, targetVol) => {
+            try {
+                // 蓝光成为正式主视频：转成 v0 同款 flex 子元素样式
+                Object.assign(vHigh.style, {
+                    position: 'static', top: '', left: '', width: 'auto', height: '100%', opacity: '1', zIndex: ''
+                });
+                vHigh.muted = targetMuted;
+                vHigh.volume = targetMuted ? 0 : targetVol;
+                // 销毁低清、移除低清 v0
+                const oldHls = this.fullPreviewHlsInstances.find(h => h !== highHls);
+                if (oldHls) { try { oldHls.destroy(); } catch (_) {} }
+                try { v0.pause(); v0.src = ''; v0.remove(); } catch (_) {}
+                // 引用切到蓝光（videos 即 previewContainer._videos，控制条/镜像随之生效）
+                videos[0] = vHigh;
+                this.currentBigVideo = vHigh;
+                this.fullPreviewHlsInstances = [highHls];
+                Logger.log('大屏已交叉淡入到蓝光');
+            } catch (e) { Logger.error('升清收尾失败:', e); }
+        };
+
+        const startCrossfade = () => {
+            if (started || failed) return;
+            if (this.isRecording || videos.length !== 1 || !vHigh.isConnected) { fail(); return; }
+            started = true;
+            clearTimeout(fb);
+
+            const targetMuted = v0.muted || v0.volume === 0;
+            const targetVol = v0.volume;
+            if (!targetMuted) { vHigh.muted = false; vHigh.volume = 0; } // 允许音量淡入
+
+            const t0 = performance.now();
+            const ramp = (now) => {
+                const k = Math.min(1, (now - t0) / FADE_MS);
+                v0.style.opacity = String(1 - k);
+                vHigh.style.opacity = String(k);
+                if (!targetMuted) {
+                    try { v0.volume = targetVol * (1 - k); } catch (_) {}
+                    try { vHigh.volume = targetVol * k; } catch (_) {}
+                }
+                if (k < 1) requestAnimationFrame(ramp);
+                else finish(targetMuted, targetVol);
+            };
+            requestAnimationFrame(ramp);
+        };
+
+        highHls.on(Hls.Events.MANIFEST_PARSED, () => { vHigh.play().catch(() => {}); });
+        vHigh.addEventListener('canplay', startCrossfade, { once: true });
+        const fb = setTimeout(startCrossfade, 6000); // 兜底
+        highHls.on(Hls.Events.ERROR, (event, data) => {
+            if (data && data.fatal && !started) { clearTimeout(fb); fail(); }
+        });
+        try { highHls.loadSource(highUrl); highHls.attachMedia(vHigh); }
+        catch (_) { clearTimeout(fb); fail(); }
     },
 
     /**
@@ -622,6 +747,19 @@ wow，好热闹;
      */
     openFullPreview(cardPreview, live) {
         this.currentLive = live;
+        // B：大屏看真直播时背后整墙不可见，暂停全部片段加载 + 循环播放（先暂停，再清掉可能残留的 hover 标记，
+        // 因 fullscreen 仍在集合中故不会触发加载；避免点开大屏时 mouseleave 不触发导致加载被永久挂起）
+        PreloadManager.pauseLoading('fullscreen');
+        PreloadManager.resumeLoading('hover');
+        // 注：只暂停「启动新的片段加载」，不暂停整墙循环播放（暂停播放体验差）
+
+        // 复用悬浮中的实时流（低清，已在播）→ 点开瞬间出画面。收养后置空 this.videoElement/this.hls，
+        // 避免随后 mouseleave 的 clearPreview 把它们销毁。
+        const adoptedVideo = this.videoElement;
+        const adoptedHls = this.hls;
+        const canReuse = !!(adoptedVideo && adoptedHls && adoptedVideo.readyState >= 2 && !adoptedVideo.paused);
+        if (canReuse) { this.videoElement = null; this.hls = null; }
+
         // 占位封面元素（首帧到达后移除）
         let placeholderEl = null;
         // 创建大屏预览模态框
@@ -712,9 +850,8 @@ wow，好热闹;
             video.volume = idx === 0 ? (globalSoundEnabled ? savedVolume : 0) : 0;
             video.playsInline = true;
             video.autoplay = true;
-            if (this.videoElement && this.videoElement.currentTime > 0) {
-                video.currentTime = this.videoElement.currentTime;
-            }
+            // 直播流永远从直播边缘起播：绝不 seek 到 hover 的旧 currentTime
+            // （对 live HLS 设 currentTime = seek 到陈旧时间点，会让 hls.js 长时间拉取卡住 → 大屏直点十几秒）
             return video;
         };
 
@@ -726,12 +863,26 @@ wow，好热闹;
             return hls;
         };
 
-        // 初始化第一个视频
+        // 初始化第一个视频：能复用悬浮流就直接搬过来（瞬间出画面），否则新建
         const vc0 = _makeVideoContainer();
-        const v0 = _makeVideo(0);
-        vc0.appendChild(v0);
+        let v0;
+        if (canReuse) {
+            v0 = adoptedVideo;
+            // 从小卡样式恢复成大屏样式（去掉悬浮时的绝对定位/裁剪）
+            Object.assign(v0.style, {
+                height: '100%', width: 'auto', objectFit: 'contain',
+                position: 'static', top: '', left: '', transform: '', opacity: '1', zIndex: ''
+            });
+            v0.muted = !globalSoundEnabled;
+            v0.volume = globalSoundEnabled ? savedVolume : 0;
+            v0.disablePictureInPicture = true;
+        } else {
+            v0 = _makeVideo(0);
+        }
+        vc0.appendChild(v0); // appendChild 会把复用的视频从小卡移入大屏
         videoContainers.push(vc0);
         videos.push(v0);
+        this.currentBigVideo = v0; // 控制条动态指向的「当前主视频」，升清交叉淡入后会更新
 
         // 将视频容器挂入视频组容器
         videoContainers.forEach(container => {
@@ -849,67 +1000,76 @@ wow，好热闹;
             return true;
         };
 
-        // 在清理时记得清除同步定时器
+        // 在清理时记得清除同步定时器（每步都容错，确保最终一定 modal.remove()，避免 ESC 关不掉）
         const cleanupHandler = () => {
-            document.removeEventListener('keydown', handleEscKey);
-            if (previewContainer._fullscreenCleanup) previewContainer._fullscreenCleanup();
+            try { document.removeEventListener('keydown', handleEscKey, true); } catch (_) {}
+            try { if (previewContainer._fullscreenCleanup) previewContainer._fullscreenCleanup(); } catch (_) {}
             clearInterval(syncInterval);
             clearInterval(timerInterval);
             clearInterval(textInterval);
             if (this.currentTextInterval) {
                 clearInterval(this.currentTextInterval);
             }
-            this.cleanupResources(); // 销毁大屏 HLS 实例及卡片预览资源
-            videos.forEach(video => {
-                video.pause();
-                video.src = '';
-            });
+            try { this.cleanupResources(); } catch (_) {} // 销毁大屏 HLS 实例及卡片预览资源
+            try { videos.forEach(video => { video.pause(); video.src = ''; }); } catch (_) {}
+            this.currentBigVideo = null;
+            // B：退出大屏，恢复整墙的片段加载（循环播放本就没暂停）
+            try { PreloadManager.resumeLoading('fullscreen'); } catch (_) {}
             modal.remove();
         };
 
-        // ESC 关闭大屏（浏览器全屏时 ESC 由浏览器处理，不触发关闭）
+        // ESC 关闭大屏（捕获阶段，确保一定能收到；浏览器全屏时 ESC 由浏览器处理，不触发关闭）
         const handleEscKey = (e) => {
             if (e.key !== 'Escape') return;
             if (document.fullscreenElement) return; // 浏览器全屏中的 ESC 交给浏览器处理
             if (!canClose()) return;
+            e.stopPropagation();
             cleanupHandler();
         };
-        document.addEventListener('keydown', handleEscKey);
+        document.addEventListener('keydown', handleEscKey, true);
 
-        // 获取直播流地址（三联屏复用同一个 streamUrl）
-        const streamUrl = this.getStreamUrl(live.streamUrlHlsMap);
-        if (!streamUrl) {
-            ToastManager.show('无法加载直播预览', 'error');
-            document.removeEventListener('keydown', handleEscKey);
+        // 低清秒开、蓝光后台升级（复用悬浮流时首帧已在播）。三联屏复用 videos[0]
+        const lowUrl = NetworkUtils.getLowestQualityUrl(live.streamUrlHlsMap);
+        const highUrl = this.getStreamUrl(live.streamUrlHlsMap);
+        const firstUrl = canReuse ? null : (lowUrl || highUrl); // 复用时无需再取流
+        if (!canReuse && !firstUrl) {
+            cleanupHandler(); // 取不到流：静默关掉空大屏并恢复整墙（不弹失败提示）
             return;
         }
 
-        // 加载失败时更新提示层文字
+        // 加载失败时静默隐藏加载层（按需求不再显示「直播加载失败」文字）
         const showLoadFail = () => {
-            loadingOverlay.style.display = 'flex';
-            const textEl = loadingOverlay.querySelector('.dy-big-loading-text');
-            if (textEl) textEl.textContent = '直播加载失败或已结束';
-            const spinner = loadingOverlay.querySelector('svg');
-            if (spinner) spinner.style.display = 'none';
+            loadingOverlay.style.display = 'none';
         };
 
         if (Hls.isSupported()) {
-            const hls0 = _makeHls(streamUrl, videos[0]);
-            this.fullPreviewHlsInstances = [hls0];
-
-            hls0.on(Hls.Events.MANIFEST_PARSED, () => {
-                videos.forEach(video => {
-                    video.play().catch(err => {
-                        if (err.name !== 'AbortError') Logger.error('大屏播放失败:', err);
+            if (canReuse) {
+                // 复用悬浮的低清实例（已在播）：直接接管，隐藏加载层
+                this.fullPreviewHlsInstances = [adoptedHls];
+                loadingOverlay.style.display = 'none';
+                if (placeholderEl) { placeholderEl.remove(); placeholderEl = null; }
+                videos[0].play().catch(() => {});
+            } else {
+                const hls0 = _makeHls(firstUrl, videos[0]);
+                this.fullPreviewHlsInstances = [hls0];
+                hls0.on(Hls.Events.MANIFEST_PARSED, () => {
+                    videos.forEach(video => {
+                        video.play().catch(err => {
+                            if (err.name !== 'AbortError') Logger.error('大屏播放失败:', err);
+                        });
                     });
                 });
-            });
+                hls0.on(Hls.Events.ERROR, (event, data) => {
+                    if (data.fatal) showLoadFail();
+                });
+            }
 
-            hls0.on(Hls.Events.ERROR, (event, data) => {
-                if (data.fatal) showLoadFail();
-            });
+            // 渐进升清：低清/复用流先顶着，后台拉蓝光，无缝替换到同一个 videos[0]
+            if (highUrl && highUrl !== firstUrl) {
+                this._upgradeBigScreenQuality(videos, highUrl, previewContainer);
+            }
         } else if (videos[0].canPlayType('application/vnd.apple.mpegurl')) {
-            videos[0].src = streamUrl;
+            videos[0].src = firstUrl || highUrl;
             videos[0].play().catch(err => {
                 if (err.name !== 'AbortError') Logger.error('大屏播放失败canPlayType:', err);
             });
@@ -1768,6 +1928,8 @@ wow，好热闹;
      * @returns {HTMLElement} 音量组合容器
      */
     createVolumeBtn(video) {
+        // 升清交叉淡入会把主视频换成蓝光元素，交互时动态取当前主视频（而非创建时捕获的旧元素）
+        const mainV = () => this.currentBigVideo || video;
         // ── 音量按钮 ──
         const volumeBtn = document.createElement('div');
         volumeBtn.setAttribute('title', '静音/取消静音');
@@ -1837,7 +1999,7 @@ wow，好热闹;
         volumeSlider.addEventListener('input', (e) => {
             e.stopPropagation();
             const vol = parseFloat(volumeSlider.value);
-            video.volume = vol;
+            mainV().volume = vol;
             updateVolumeIcon(vol);
             if (vol > 0) {
                 lastVolume = vol;
@@ -1853,17 +2015,18 @@ wow，好热闹;
         // ── 按钮点击：切换静音，同步更新滑块和全局设置 ──
         volumeBtn.addEventListener('click', (e) => {
             e.stopPropagation();
-            if (video.volume > 0) {
-                lastVolume = video.volume;
-                video.volume = 0;
+            const v = mainV();
+            if (v.volume > 0) {
+                lastVolume = v.volume;
+                v.volume = 0;
             } else {
-                video.volume = lastVolume;
+                v.volume = lastVolume;
                 SettingsManager.setVolume(lastVolume);
             }
-            volumeSlider.value = video.volume;   // 同步滑块位置
-            updateVolumeIcon(video.volume);
-            SettingsManager.setSoundEnabled(video.volume > 0);
-            syncHeaderSoundBtn(video.volume > 0);
+            volumeSlider.value = v.volume;   // 同步滑块位置
+            updateVolumeIcon(v.volume);
+            SettingsManager.setSoundEnabled(v.volume > 0);
+            syncHeaderSoundBtn(v.volume > 0);
         });
 
         // ── 组合容器 ──
@@ -2249,6 +2412,8 @@ wow，好热闹;
      * @returns {HTMLElement} 录制按钮
      */
     createRecordBtn(container, video) {
+        // 升清后主视频可能已换成蓝光元素，录制时动态取当前主视频
+        const mainV = () => this.currentBigVideo || video;
         const recordBtn = document.createElement('div');
         recordBtn.setAttribute('title', '开始录制');
         this.createCtrlBtnBaseStyle(recordBtn);
@@ -2265,8 +2430,8 @@ wow，好热闹;
             }
             if (!this.isRecording) {
                 try {
-                    // 获取视频元素的媒体流
-                    const stream = video.captureStream();
+                    // 获取视频元素的媒体流（动态取当前主视频，升清后仍正确）
+                    const stream = mainV().captureStream();
                     if (!stream) {
                         ToastManager.show('没有可用的视频流', TOAST.TYPE.ERROR);
                         return;
@@ -2479,9 +2644,9 @@ wow，好热闹;
                 // 移除模态框
                 modal.remove();
 
-                // 执行移出预览区域的逻辑
+                // 执行移出预览区域的逻辑（动态取当前主视频，升清后抓的是蓝光帧）
                 if (cardPreview) {
-                    this.clearPreview(cardPreview, this.currentLive, video, document.querySelector('.dy-loading'));
+                    this.clearPreview(cardPreview, this.currentLive, this.currentBigVideo || video, document.querySelector('.dy-loading'));
                 }
             }
         };

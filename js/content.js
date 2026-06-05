@@ -38,7 +38,7 @@ class DouyinLivePlugin {
 (async () => {
     try {
         Logger.log('开始加载插件');
-        // 从 chrome.storage.sync 加载特别关心缓存 + 全局设置（同时处理旧 localStorage 数据迁移）
+        // 从 chrome.storage 加载特别关心缓存 + 全局设置 + 授权 + 氛围词条
         await Promise.all([FavoriteManager.init(), SettingsManager.init(), LicenseManager.init(), AtmosphereManager.init()]);
         const plugin = new DouyinLivePlugin();
         plugin.init();

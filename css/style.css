@@ -365,16 +365,22 @@ html[dark="true"] .tab-follow-live .follow-live-icon {
 .dylh-lic-btn {
   display: flex;
   align-items: center;
+  justify-content: center;
   cursor: pointer;
   flex-shrink: 0;
 }
 
+/* PRO 按钮与其它菜单按钮等大（104×36 由 MENU_BTN 内联给出），badge 填满整框、仅外观不同 */
 .dylh-lic-badge-pro,
 .dylh-lic-badge-free {
   display: inline-flex;
   align-items: center;
-  padding: 4px 10px;
-  border-radius: 5px;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+  box-sizing: border-box;
+  padding: 0 10px;
+  border-radius: 4px;
   font-size: 12px;
   font-weight: 700;
   letter-spacing: 0.3px;

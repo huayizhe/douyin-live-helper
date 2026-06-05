@@ -17,11 +17,10 @@ const AtmosphereManager = {
     _cache: {},
 
     /**
-     * 初始化：迁移旧 localStorage → 从 storage.local 加载 → 监听变更。
+     * 初始化：从 storage.local 加载 → 监听变更。
      * 在 content.js 启动时 await 调用一次。
      */
     async init() {
-        await this._migrateFromLocalStorage();
         const result = await chrome.storage.local.get(this.STORAGE_KEY);
         this._cache = result[this.STORAGE_KEY] || this._cache || {};
 
@@ -30,43 +29,6 @@ const AtmosphereManager = {
                 this._cache = changes[this.STORAGE_KEY].newValue || {};
             }
         });
-    },
-
-    /** 把旧的 etmosphereEntryConfig_* / etmosphereEntryEnabled_* 迁移到 storage.local */
-    async _migrateFromLocalStorage() {
-        try {
-            const migrated = {};
-            let found = false;
-            for (let i = 0; i < localStorage.length; i++) {
-                const key = localStorage.key(i);
-                if (!key) continue;
-                let m;
-                if ((m = key.match(/^etmosphereEntryConfig_(.+)$/))) {
-                    const sec = m[1];
-                    (migrated[sec] = migrated[sec] || {}).entries = localStorage.getItem(key);
-                    found = true;
-                } else if ((m = key.match(/^etmosphereEntryEnabled_(.+)$/))) {
-                    const sec = m[1];
-                    (migrated[sec] = migrated[sec] || {}).display = localStorage.getItem(key) === 'true';
-                    found = true;
-                }
-            }
-            if (!found) return;
-
-            const existing = (await chrome.storage.local.get(this.STORAGE_KEY))[this.STORAGE_KEY] || {};
-            for (const sec in migrated) {
-                existing[sec] = { ...migrated[sec], ...existing[sec] }; // 已有 local 数据优先
-            }
-            await chrome.storage.local.set({ [this.STORAGE_KEY]: existing });
-            this._cache = existing;
-
-            Object.keys(migrated).forEach(sec => {
-                localStorage.removeItem(`etmosphereEntryConfig_${sec}`);
-                localStorage.removeItem(`etmosphereEntryEnabled_${sec}`);
-            });
-        } catch (_) {
-            // 迁移失败不影响功能
-        }
     },
 
     _get(secUid) { return this._cache[secUid] || {}; },

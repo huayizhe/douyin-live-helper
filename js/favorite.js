@@ -17,26 +17,8 @@ const FavoriteManager = {
     /**
      * 初始化：从 chrome.storage.sync 加载缓存，并监听跨标签/跨设备变更。
      * 需在插件启动时 await 调用一次（content.js）。
-     * 同时自动将旧的 localStorage 数据迁移到 storage.sync。
      */
     async init() {
-        // 尝试迁移旧的 localStorage 数据
-        const oldData = localStorage.getItem(this.STORAGE_KEY);
-        if (oldData) {
-            try {
-                const parsed = JSON.parse(oldData);
-                if (Array.isArray(parsed) && parsed.length > 0) {
-                    await chrome.storage.sync.set({ [this.STORAGE_KEY]: parsed });
-                    localStorage.removeItem(this.STORAGE_KEY);
-                    this._cache = parsed;
-                    return;
-                }
-            } catch (_) {
-                // 解析失败则忽略旧数据
-            }
-            localStorage.removeItem(this.STORAGE_KEY);
-        }
-
         // 从 storage.sync 加载
         const result = await chrome.storage.sync.get(this.STORAGE_KEY);
         this._cache = result[this.STORAGE_KEY] || [];

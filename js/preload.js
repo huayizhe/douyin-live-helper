@@ -33,14 +33,17 @@ export const PreloadManager = {
     queue: [],
     // 正在加载/录制的路数
     activeLoads: 0,
+    // 暂停加载的原因集合（hover/fullscreen/hidden 任一存在即暂停启动新加载）
+    _pauseReasons: new Set(),
 
     // —— 可调参数 ——
-    // 同时加载/录制的最大并发（约一屏可见数；仅加载期瞬时峰值，稳态仍是本地循环视频）
+    // 同时加载/录制的并发**上限**（约一屏可见数；仅加载期瞬时峰值，稳态仍是本地循环视频）。
+    // 实际值在 init() 里按设备核数自适应下调（弱机防卡顿），不会超过此上限。
     MAX_CONCURRENT: 9,
-    // 片段缓存软上限，超出按时间淘汰
-    MAX_CACHE: 40,
-    // 单段录制时长（毫秒）
-    RECORD_MS: 12000,
+    // 片段缓存软上限，超出按时间淘汰（120×~0.8MB≈100MB blob，存储非解码）
+    MAX_CACHE: 120,
+    // 单段录制时长（毫秒）：8s 足够形成「会动的缩略图」，比 12s 省约 1/3 开销（抖音官方约 10s）
+    RECORD_MS: 8000,
     // 单路加载/录制整体超时（毫秒）
     LOAD_TIMEOUT: 20000,
     // 最大重试次数
@@ -54,6 +57,33 @@ export const PreloadManager = {
         if (!HLS) {
             Logger.error('HLS.js 未加载，循环片段功能不可用');
         }
+        // E：按设备逻辑核数自适应并发上限——弱机调小防卡顿、强机满速；下限 4、不超过 MAX_CONCURRENT。
+        const cores = navigator.hardwareConcurrency || 6; // 未知时按中端 6 核处理
+        this.MAX_CONCURRENT = Math.max(4, Math.min(this.MAX_CONCURRENT, Math.ceil(cores * 0.75)));
+        Logger.log(`并发上限自适应为 ${this.MAX_CONCURRENT}（核数 ${cores}）`);
+
+        // C：标签页切到后台只暂停「启动新的片段加载」，不暂停循环播放（回前台恢复加载）
+        document.addEventListener('visibilitychange', () => {
+            if (document.hidden) this.pauseLoading('hidden');
+            else this.resumeLoading('hidden');
+        });
+    },
+
+    /**
+     * 暂停启动新的片段加载（in-flight 的让其录完）。
+     * @param {string} reason - 暂停原因（hover/fullscreen/hidden）
+     */
+    pauseLoading(reason) {
+        this._pauseReasons.add(reason);
+    },
+
+    /**
+     * 解除某原因的暂停；无其它原因时恢复调度。
+     * @param {string} reason
+     */
+    resumeLoading(reason) {
+        this._pauseReasons.delete(reason);
+        if (this._pauseReasons.size === 0) this._pump();
     },
 
     /**
@@ -118,6 +148,8 @@ export const PreloadManager = {
         if (this.visible.get(roomUrl) === cardPreview) {
             this.visible.delete(roomUrl);
         }
+        // 在录则中止（销毁实例、移除视频），避免悬空
+        if (cardPreview && cardPreview._clipAbort) { try { cardPreview._clipAbort(); } catch (_) {} }
         this._removeLoopVideo(cardPreview);
     },
 
@@ -126,6 +158,8 @@ export const PreloadManager = {
      * @private
      */
     _pump() {
+        // 暂停期间不启动新加载（hover/大屏/后台）
+        if (this._pauseReasons.size) return;
         while (this.activeLoads < this.MAX_CONCURRENT && this.queue.length > 0) {
             const { live, refresh } = this.queue.shift();
             // 排队期间若已被其它途径缓存，跳过（刷新任务除外，它就是要重录覆盖）
@@ -139,32 +173,47 @@ export const PreloadManager = {
     },
 
     /**
-     * 启动单路：拉最低清晰度 → 录制 → blob → 销毁 HLS → 缓存 → 挂载。
+     * 启动单路：在**可见卡片**里直接播低清实时（第 0 秒就动），同时录制；
+     * 录满 RECORD_MS 后把同一个 video 无缝切到本地循环 blob 并断开直播。消除「录满才显示」的空窗。
      * @private
      */
     _startLoad(live) {
         const roomUrl = live.roomUrl;
+
+        // 卡片已离场就放弃（省无用功）；下次进视口再排队
+        const cardPreview = this.visible.get(roomUrl);
+        if (!cardPreview) {
+            this.status.delete(roomUrl);
+            this._pump();
+            return;
+        }
+
         this.activeLoads++;
         this.status.set(roomUrl, 'loading');
         Logger.log('开始加载循环片段:', live.anchor);
 
         const url = NetworkUtils.getLowestQualityUrl(live.streamUrlHlsMap);
         if (!url) {
-            this._finishLoad(roomUrl, false, '无可用流地址');
+            this._finishLoad(roomUrl, false, '无可用流地址', null, live, null);
             return;
         }
 
-        // 离屏隐藏视频（用离屏定位而非 display:none，避免解码被节流影响 captureStream）
-        const video = DOMUtils.createElement('video', {
-            styles: {
-                position: 'fixed', left: '-10000px', top: '0',
-                width: '180px', height: '320px', opacity: '0', pointerEvents: 'none', zIndex: '-1'
-            },
-            attributes: { playsInline: 'true', preload: 'auto' }
+        // 在卡片内插入**可见**视频（录制期间就是缩略图，从第 0 秒就动）
+        this._removeLoopVideo(cardPreview); // 清掉可能存在的旧循环（刷新场景）
+        const video = document.createElement('video');
+        Object.assign(video.style, {
+            position: 'absolute', top: '0', left: '0', width: '100%', height: '100%',
+            objectFit: 'cover', zIndex: '0'
         });
         video.muted = true;
         video.volume = 0;
-        document.body.appendChild(video);
+        video.playsInline = true;
+        video.autoplay = true;
+        video.disablePictureInPicture = true;
+        video.oncontextmenu = (e) => e.preventDefault();
+        cardPreview.insertBefore(video, cardPreview.firstChild);
+        cardPreview._clipVideo = video;
+        cardPreview._clipLoading = true;
 
         let hls = null;
         let recorder = null;
@@ -172,25 +221,49 @@ export const PreloadManager = {
         let aspect = null; // 宽高比 = videoWidth/videoHeight，用于横竖屏渲染
         const chunks = [];
 
-        // 取流的真实宽高比（横屏≈1.78、竖屏≈0.56），录制成功时存入缓存
-        video.addEventListener('loadedmetadata', () => {
-            if (video.videoWidth && video.videoHeight) aspect = video.videoWidth / video.videoHeight;
-        });
-
         // 整体超时保护
-        const timeout = setTimeout(() => {
-            if (!done) cleanup(false, '加载超时');
-        }, this.LOAD_TIMEOUT);
+        const timeout = setTimeout(() => { if (!done) cleanup('加载超时'); }, this.LOAD_TIMEOUT);
 
-        const cleanup = (ok, reason, blobUrl) => {
+        // 失败/中止：销毁实例、移除可见视频
+        const cleanup = (reason) => {
             if (done) return;
             done = true;
             clearTimeout(timeout);
-            try { if (recorder && recorder.state !== 'inactive') recorder.stop(); } catch (_) {}
+            try { if (recorder) { recorder.onstop = null; if (recorder.state !== 'inactive') recorder.stop(); } } catch (_) {}
             try { if (hls) { hls.stopLoad(); hls.destroy(); } } catch (_) {}
-            try { video.pause(); video.src = ''; video.remove(); } catch (_) {}
-            this._finishLoad(roomUrl, ok, reason, blobUrl, live, aspect);
+            if (cardPreview._clipVideo === video) {
+                try { video.pause(); video.src = ''; video.remove(); } catch (_) {}
+                cardPreview._clipVideo = null;
+            }
+            cardPreview._clipLoading = false;
+            cardPreview._clipAbort = null;
+            this._finishLoad(roomUrl, false, reason, null, live, aspect);
         };
+
+        // 成功：同一个可见 video 无缝切到本地循环、断开直播
+        const finalizeLoop = (blobUrl, size) => {
+            if (done) return;
+            done = true;
+            clearTimeout(timeout);
+            try { if (hls) { hls.stopLoad(); hls.destroy(); hls = null; } } catch (_) {}
+            video.loop = true;
+            video.src = blobUrl;
+            video.play().catch(() => {});
+            cardPreview._clipLoading = false;
+            cardPreview._clipAbort = null;
+            this._finishLoad(roomUrl, true, null, blobUrl, live, aspect, size);
+        };
+
+        // 离场中止
+        cardPreview._clipAbort = () => cleanup('离场中止');
+
+        // 真实宽高比 + 横竖屏渲染（拿到 metadata 即应用）
+        video.addEventListener('loadedmetadata', () => {
+            if (video.videoWidth && video.videoHeight) {
+                aspect = video.videoWidth / video.videoHeight;
+                StyleUtils.applyMediaOrientation(cardPreview, video, StyleUtils.isLandscapeRatio(aspect));
+            }
+        });
 
         // 录满 RECORD_MS 后停止录制，落地 blob
         const startRecording = () => {
@@ -201,15 +274,14 @@ export const PreloadManager = {
                     ? { mimeType, videoBitsPerSecond: this.CLIP_BITRATE }
                     : { videoBitsPerSecond: this.CLIP_BITRATE });
             } catch (e) {
-                cleanup(false, '创建录制器失败');
+                cleanup('创建录制器失败');
                 return;
             }
             recorder.ondataavailable = (e) => { if (e.data && e.data.size) chunks.push(e.data); };
             recorder.onstop = () => {
-                if (!chunks.length) { cleanup(false, '录制无数据'); return; }
+                if (!chunks.length) { cleanup('录制无数据'); return; }
                 const blob = new Blob(chunks, { type: chunks[0].type || 'video/webm' });
-                const blobUrl = URL.createObjectURL(blob);
-                cleanup(true, null, blobUrl);
+                finalizeLoop(URL.createObjectURL(blob), blob.size);
             };
             recorder.start();
             setTimeout(() => { try { if (recorder.state !== 'inactive') recorder.stop(); } catch (_) {} }, this.RECORD_MS);
@@ -221,7 +293,7 @@ export const PreloadManager = {
         if (HLS && HLS.isSupported()) {
             hls = new HLS(HLSUtils.createPreloadConfig());
             hls.on(HLS.Events.ERROR, (event, data) => {
-                if (data && data.fatal && !recorder) cleanup(false, 'HLS致命错误');
+                if (data && data.fatal && !recorder) cleanup('HLS致命错误');
             });
             hls.loadSource(url);
             hls.attachMedia(video);
@@ -229,9 +301,9 @@ export const PreloadManager = {
         } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
             video.src = url;
             video.addEventListener('loadedmetadata', () => { video.play().catch(() => {}); });
-            video.addEventListener('error', () => { if (!recorder) cleanup(false, '原生HLS错误'); });
+            video.addEventListener('error', () => { if (!recorder) cleanup('原生HLS错误'); });
         } else {
-            cleanup(false, '浏览器不支持HLS');
+            cleanup('浏览器不支持HLS');
         }
     },
 
@@ -239,11 +311,11 @@ export const PreloadManager = {
      * 单路收尾：成功则缓存 blob 并挂到可见卡片；失败则按需重试；最后释放并发槽并继续调度。
      * @private
      */
-    _finishLoad(roomUrl, ok, reason, blobUrl, live, aspect) {
+    _finishLoad(roomUrl, ok, reason, blobUrl, live, aspect, size) {
         this.activeLoads = Math.max(0, this.activeLoads - 1);
 
         if (ok && blobUrl) {
-            this._cacheClip(roomUrl, blobUrl, aspect);
+            this._cacheClip(roomUrl, blobUrl, aspect, size);
             this.status.set(roomUrl, 'ready');
             this.retry.delete(roomUrl);
             this._tryAttachVisible(roomUrl);
@@ -275,14 +347,14 @@ export const PreloadManager = {
      * 缓存片段 blob，超出软上限按时间淘汰最旧者并释放其 URL。
      * @private
      */
-    _cacheClip(roomUrl, blobUrl, aspect) {
+    _cacheClip(roomUrl, blobUrl, aspect, size) {
         const old = this.preloadCache.get(roomUrl);
         if (old && old.blobUrl && old.blobUrl !== blobUrl) {
             try { URL.revokeObjectURL(old.blobUrl); } catch (_) {}
         }
         // 刷新时若本次未取到宽高比，沿用旧值
         const ratio = aspect || (old && old.aspect) || null;
-        this.preloadCache.set(roomUrl, { blobUrl, timestamp: Date.now(), aspect: ratio });
+        this.preloadCache.set(roomUrl, { blobUrl, timestamp: Date.now(), aspect: ratio, size: size || 0 });
 
         while (this.preloadCache.size > this.MAX_CACHE) {
             // 找最旧且当前不可见的条目优先淘汰
@@ -353,11 +425,32 @@ export const PreloadManager = {
     },
 
     /**
+     * 资源监控用：返回片段管理器的真实快照（缓存/加载/并发/暂停/真实字节）。
+     */
+    getStats() {
+        let cacheBytes = 0;
+        for (const v of this.preloadCache.values()) cacheBytes += (v.size || 0);
+        let loopVideos = 0;
+        for (const card of this.visible.values()) if (card && card._clipVideo) loopVideos++;
+        return {
+            cached: this.preloadCache.size,
+            maxCache: this.MAX_CACHE,
+            cacheBytes,
+            loading: this.activeLoads,
+            queued: this.queue.length,
+            maxConcurrent: this.MAX_CONCURRENT,
+            pauseReasons: [...this._pauseReasons],
+            loopVideos
+        };
+    },
+
+    /**
      * 暂停某卡片的循环视频（悬浮切实时流时调用，省解码）。
      * @param {HTMLElement} cardPreview
      */
     pauseCard(cardPreview) {
-        const v = cardPreview && cardPreview._clipVideo;
+        if (!cardPreview || cardPreview._clipLoading) return; // 录制中不暂停，避免污染录制
+        const v = cardPreview._clipVideo;
         if (v) { try { v.pause(); } catch (_) {} }
     },
 

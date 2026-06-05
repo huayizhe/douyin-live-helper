@@ -45,6 +45,21 @@ const ModalUI = {
     COMPARE_MAX: 3,
 
     /**
+     * 网格列数控制：按容器宽度算列数并夹在 [MIN, MAX]（均可调）
+     * GRID_TARGET 为单卡目标宽度（决定多宽换一列），GRID_GAP 需与 .live-grid 的 gap 一致
+     */
+    GRID_TARGET: 280,
+    GRID_MIN_COLS: 2,
+    GRID_MAX_COLS: 6,
+    GRID_GAP: 20,
+
+    /**
+     * 卡片进视口后停留多久才开始录制（毫秒）：避免快速滚动一闪而过的卡片也拉流，省无用功。
+     * 命中缓存的片段不受此延迟影响，立即挂上播放。
+     */
+    CLIP_SETTLE_MS: 400,
+
+    /**
      * 显示模态框
      */
     async show() {
@@ -78,6 +93,7 @@ const ModalUI = {
                 if (modal) {
                     this.enableDouyinShortcuts();
                     this._teardownClipObserver();
+                    this._teardownGridResize();
                     PreloadManager.visible.clear();
                     modal.remove();
                 }
@@ -166,7 +182,7 @@ const ModalUI = {
                 padding: '16px 20px',
                 borderBottom: `1px solid ${isDarkMode ? '#3f3f3f' : '#eee'}`,
                 display: 'flex',
-                alignItems: 'center',
+                alignItems: 'flex-start',
                 position: 'relative'
             }
         });
@@ -175,8 +191,10 @@ const ModalUI = {
             styles: {
                 display: 'flex',
                 alignItems: 'center',
-                gap: '12px',
-                flex: 1
+                flexWrap: 'wrap',
+                gap: '10px',
+                flex: 1,
+                paddingRight: '48px' // 给绝对定位的关闭按钮留位，避免首行按钮被压住
             }
         });
 
@@ -193,6 +211,37 @@ const ModalUI = {
         const licenseBtn = LicenseManager.createLicenseBtn(isDarkMode);  // PRO 授权按钮
         const liveCount = this.createLiveCountElement(isDarkMode);   // 直播数量显示
         const closeButton = this.createCloseButton(isDarkMode);      // 关闭按钮
+
+        // 统一菜单按钮宽高（整洁排列）：文字不换行、固定 104×36、居中、换行时不拉伸
+        const MENU_BTN = {
+            height: '36px',
+            width: '104px',
+            minWidth: '104px',
+            padding: '0 10px',
+            boxSizing: 'border-box',
+            justifyContent: 'center',
+            whiteSpace: 'nowrap',
+            flex: '0 0 auto',
+            overflow: 'hidden'
+        };
+        [favoriteButton, sortButton, refreshButton, globalSoundBtn,
+         compareButton, clearCompareButton, scrollTopButton, resourceButton, licenseBtn, liveCount]
+            .forEach(btn => { if (btn) Object.assign(btn.style, MENU_BTN); });
+        // PRO 按钮：与其它按钮等大（badge 由 CSS 填满整框），仅外观不同
+        Object.assign(licenseBtn.style, { display: 'flex', alignItems: 'center', justifyContent: 'center' });
+
+        // 搜索框：宽度 = 两个按钮宽 + 一个间隔（与按钮网格对齐显得整齐），高度对齐 36
+        const btnW = parseInt(MENU_BTN.width, 10);   // 104
+        const searchW = btnW * 2 + 10;               // 两按钮 + 一个 gap(10)
+        Object.assign(searchInput.style, {
+            width: `${searchW}px`,
+            height: '36px',
+            boxSizing: 'border-box',
+            flex: '0 0 auto'
+        });
+
+        // 关闭按钮：始终钉在右上角（header 已是 position:relative）
+        Object.assign(closeButton.style, { position: 'absolute', top: '12px', right: '16px' });
 
         // 按顺序添加到左侧按钮组
         leftGroup.appendChild(searchInput);    // 1. 搜索框放最左边
@@ -335,7 +384,7 @@ const ModalUI = {
             innerHTML: `
                 <div class="live-grid" style="
                     display: grid;
-                    grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+                    grid-template-columns: repeat(2, 1fr);
                     gap: 20px;
                     width: 100%;
                     padding: 0;
@@ -381,6 +430,7 @@ const ModalUI = {
                 // 恢复抖音快捷键
                 this.enableDouyinShortcuts();
                 this._teardownClipObserver();
+                this._teardownGridResize();
                 PreloadManager.visible.clear();
                 modal.remove();
             }
@@ -399,6 +449,9 @@ const ModalUI = {
             Logger.error('未找到直播列表容器元素');
             return;
         }
+
+        // 按容器宽度算列数（夹在 2~6）并绑定 resize 重算
+        this._setupGridResize(liveGrid);
 
         try {
             // 显示加载动画
@@ -601,8 +654,17 @@ const ModalUI = {
                 const live = cardPreview._live;
                 if (!live) return;
                 if (entry.isIntersecting) {
-                    PreloadManager.ensureClip(live, cardPreview);
+                    // D：命中缓存即时挂；未缓存则停留 CLIP_SETTLE_MS 仍在视口才开始录制，避免快速滚动一闪而过也拉流
+                    if (PreloadManager.preloadCache.has(live.roomUrl)) {
+                        PreloadManager.ensureClip(live, cardPreview);
+                    } else {
+                        clearTimeout(cardPreview._clipEnterTimer);
+                        cardPreview._clipEnterTimer = setTimeout(() => {
+                            PreloadManager.ensureClip(live, cardPreview);
+                        }, this.CLIP_SETTLE_MS);
+                    }
                 } else {
+                    clearTimeout(cardPreview._clipEnterTimer);
                     PreloadManager.release(live.roomUrl, cardPreview);
                 }
             });
@@ -617,6 +679,43 @@ const ModalUI = {
         if (this._clipObserver) {
             this._clipObserver.disconnect();
             this._clipObserver = null;
+        }
+    },
+
+    /**
+     * 按容器宽度计算列数并写入网格，夹在 [GRID_MIN_COLS, GRID_MAX_COLS]。
+     * @private
+     * @param {HTMLElement} grid - .live-grid 容器
+     */
+    _applyGridColumns(grid) {
+        if (!grid) return;
+        const w = grid.clientWidth;
+        if (!w) return;
+        let n = Math.floor((w + this.GRID_GAP) / (this.GRID_TARGET + this.GRID_GAP));
+        n = Math.max(this.GRID_MIN_COLS, Math.min(this.GRID_MAX_COLS, n));
+        grid.style.gridTemplateColumns = `repeat(${n}, 1fr)`;
+    },
+
+    /**
+     * 绑定窗口 resize 重算列数（防抖），并立即算一次。
+     * @private
+     * @param {HTMLElement} grid - .live-grid 容器
+     */
+    _setupGridResize(grid) {
+        this._teardownGridResize();
+        this._applyGridColumns(grid);
+        this._gridResizeHandler = DOMUtils.debounce(() => this._applyGridColumns(grid), 150);
+        window.addEventListener('resize', this._gridResizeHandler);
+    },
+
+    /**
+     * 解绑 resize 监听（关闭弹窗时调用）。
+     * @private
+     */
+    _teardownGridResize() {
+        if (this._gridResizeHandler) {
+            window.removeEventListener('resize', this._gridResizeHandler);
+            this._gridResizeHandler = null;
         }
     },
 
@@ -1118,11 +1217,19 @@ const ModalUI = {
      * @private
      */
     createLiveCountElement(isDarkMode) {
+        // 与菜单按钮同款外观，但纯展示：无 hover 背景、无点击
         return DOMUtils.createElement('span', {
             className: 'live-count',
             styles: {
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                border: `1px solid ${isDarkMode ? '#3f3f3f' : '#ddd'}`,
+                borderRadius: '4px',
                 fontSize: '14px',
-                color: isDarkMode ? '#aaa' : '#666'
+                color: isDarkMode ? '#aaa' : '#666',
+                cursor: 'default',
+                userSelect: 'none'
             }
         });
     },
@@ -1135,7 +1242,7 @@ const ModalUI = {
     updateLiveCount(modal, count) {
         const liveCount = modal.querySelector('.live-count');
         if (liveCount) {
-            liveCount.textContent = `${count}个主播正在直播`;
+            liveCount.textContent = `${count}直播`;
         }
     },
 

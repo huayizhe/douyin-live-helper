@@ -14,33 +14,15 @@ const SettingsManager = {
     },
 
     /**
-     * 初始化：迁移旧 localStorage 设置 → 从 storage.sync 加载 → 监听变更。
+     * 初始化：从 storage.sync 加载 → 监听变更。
      * 需在插件启动时 await 调用一次（content.js）。
      */
     async init() {
-        // 迁移旧的 localStorage 配置
-        const oldVolume = localStorage.getItem('previewVolume');
-        const oldSound = localStorage.getItem('globalSoundEnabled');
-        let migrated = false;
-        if (oldVolume !== null) {
-            const v = parseFloat(oldVolume);
-            if (!isNaN(v)) { this._cache.previewVolume = v; migrated = true; }
-            localStorage.removeItem('previewVolume');
-        }
-        if (oldSound !== null) {
-            this._cache.globalSoundEnabled = oldSound !== 'false';
-            migrated = true;
-            localStorage.removeItem('globalSoundEnabled');
-        }
-
-        // 从 storage.sync 加载（已有则覆盖默认/迁移值）
+        // 从 storage.sync 加载（已有则覆盖默认值）
         const result = await chrome.storage.sync.get(this.STORAGE_KEY);
         const stored = result[this.STORAGE_KEY];
         if (stored && typeof stored === 'object') {
             this._cache = { ...this._cache, ...stored };
-        } else if (migrated) {
-            // 没有云端值但有迁移值，写回
-            this._persist();
         }
 
         // 监听跨标签/跨设备变更

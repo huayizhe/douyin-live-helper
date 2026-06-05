@@ -131,8 +131,8 @@ const LiveCard = {
                     padding: 28px 10px 10px 10px;
                     background: linear-gradient(transparent, rgba(0,0,0,0.3));
                     display: flex;
-                    align-items: flex-end;
-                    gap: 8px;
+                    align-items: center;
+                    gap: 0;
                     pointer-events: none;
                 ">
                     <img src="${live.avatar}" class="user-avatar" title="点击跳转个人主页" style="
@@ -140,6 +140,7 @@ const LiveCard = {
                         height: 32px;
                         border-radius: 50%;
                         flex-shrink: 0;
+                        margin-right: 4px;
                         cursor: pointer;
                         pointer-events: auto;
                     ">
@@ -161,28 +162,34 @@ const LiveCard = {
                             align-items: center;
                             justify-content: space-between;
                             gap: 6px;
-                            margin-top: 2px;
+                            margin-top: 5px;
                         ">
-                            <span class="username" style="
+                            <span class="username" title="点击跳转直播间" style="
                                 color: #fff;
                                 font-size: 12px;
                                 overflow: hidden;
                                 text-overflow: ellipsis;
                                 white-space: nowrap;
                                 min-width: 0;
+                                cursor: pointer;
+                                pointer-events: auto;
                                 text-shadow: 0 1px 2px rgba(0,0,0,0.6);
                             ">@${live.anchor}</span>
-                            <span class="viewer-count" style="
+                            <span class="viewer-count" title="在线观众" style="
                                 color: #fff;
                                 font-size: 11px;
                                 flex-shrink: 0;
+                                display: inline-flex;
+                                align-items: center;
+                                gap: 3px;
                                 text-shadow: 0 1px 2px rgba(0,0,0,0.6);
-                            ">${live.user_count_str}在线观众</span>
+                            "><svg width="12" height="12" viewBox="0 0 24 24" fill="#fff" style="filter:drop-shadow(0 1px 1px rgba(0,0,0,0.6))"><path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"/></svg>${live.user_count_str}</span>
                         </div>
                     </div>
                     <div class="favorite-btn" style="
                         width: 26px;
                         height: 26px;
+                        margin-left: 8px;
                         cursor: pointer;
                         display: flex;
                         justify-content: center;
@@ -237,14 +244,19 @@ const LiveCard = {
             PreviewManager.openFullPreview(cardPreview, live);
         };
 
-        // 标题点击跳转直播间
+        // 标题、昵称点击都跳转直播间
+        const openRoom = (e) => {
+            e.stopPropagation();
+            window.open(live.roomUrl, '_blank');
+        };
         const title = card.querySelector('.title-text');
         if (title) {
-            title.onclick = (e) => {
-                e.stopPropagation();
-                window.open(live.roomUrl, '_blank');
-            };
+            title.onclick = openRoom;
             title.style.cursor = 'pointer';
+        }
+        const username = card.querySelector('.username');
+        if (username) {
+            username.onclick = openRoom;
         }
 
         // 头像点击跳转主页
