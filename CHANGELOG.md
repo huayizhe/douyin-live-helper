@@ -5,6 +5,27 @@
 
 ---
 
+## [1.3.1] - 2026-06-06
+
+### 变更
+- **清晰度切换改为「续播 1.5s 再硬切」**（`preview.js`：`_crossfadeBigScreenQuality` → `_switchBigScreenQuality`）：弃用原有透明度/音量交叉淡入。新流出画面（`canplay`）后**继续播放 1.5 秒再一次性切换直播源**，简单稳定，避免淡入期间黑屏/闪缩/同步出错；录制中、三联屏仍禁用切换；`canplay` 未触发 8s 兜底直接切；新流致命错误前回滚。
+- **「对比预览」按钮改名为「N 同时看」**（`modal.js` `createCompareButton` / `updateCompareButton`）：去掉两矩形 SVG 图标，计数前置（如「2 同时看」「3 同时看」），放宽内边距 + `white-space: nowrap`，避免按钮在窄屏下被挤断行。
+- **清晰度档位菜单宽度对齐按钮**（`preview.js` `createQualityBtn`）：菜单从 `right:0; minWidth:72px` 改为 `left:0; right:0`，宽度自动等于按钮；档位项 padding 收窄到 `8px 6px`，短文案仍居中。
+- **设备识别码改为浏览器指纹确定性派生**（`license.js`：新增 `_computeFingerprint`）：原方案是首次生成随机 UUID 后存 `storage.local`，**插件被移除后再添加**会清空 local → 设备码变化 → 旧激活码 `payload.m` 不匹配而失效。新方案在缓存缺失时由稳定信号（`platform`、`hardwareConcurrency`、`deviceMemory`、屏幕尺寸/色深、语言、时区、`maxTouchPoints`）做 `SHA-256`，取前 32 位 hex 加 `fp-` 前缀。重装后能再次算出**同一个**设备码，旧激活码重新粘贴即可恢复 PRO；指纹失败兜底为随机值。激活码绑定/验签逻辑（`_verify`/`activate`/`deactivate`）保持不变。
+- **ESC 关闭顺序前移**（`modal.js` `disableDouyinShortcuts`）：原顺序在大屏/对比/全屏时直接 `return`，导致**叠在大屏之上**的 PRO 激活弹窗、会员信息弹窗、资源监控面板按 ESC 无反应。现把这两类浮层的关闭判定提到大屏早退之前，ESC 在所有场景下都能优先关掉最上层浮层；二者都不在时再交给大屏自身 ESC 或关闭列表。
+
+### 修复
+- **重装插件后 PRO 激活码失效**：见上条「设备识别码确定性派生」。前提：用户保留 `chrome.storage.local`（真卸载必然清空本地数据，未迁 `storage.sync`），仅消除「设备码漂移」这一项失效原因，旧激活码仍可用。
+- **PRO 激活弹窗/会员信息弹窗/资源面板叠在大屏之上时按 ESC 关不掉**：见上条「ESC 关闭顺序前移」。
+
+### 迁移提示
+- 设备码生成口径变了。**已用旧随机 UUID 设备码签发过的激活码**，重装后设备码会从 UUID 变成指纹码，旧码 `payload.m` 不再匹配——需用 `tools/issue-license.js --machine=<新设备码>` 重新签发一次。项目早期、激活码自签可控，影响有限。
+
+### 文档修订
+- `DEV.md` / `README.md` 中「特别关心 / 设置使用 `chrome.storage.sync`」的描述与代码不符。实际从 1.1.0 起这两项就用 `chrome.storage.local`（按扩展隔离、跨 www/live 子域共享、跨设备**不**同步；真卸载会清空）。本次统一改正。
+
+---
+
 ## [1.3.0] - 2026-06-04
 
 ### 新增

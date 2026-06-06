@@ -23,7 +23,8 @@
 
 3. 特别关心：
    - 卡片上标记主播为"特别关心"，顶部可一键筛选
-   - 使用 chrome.storage.sync 存储 (favorite.js)，跨 www/live 子域、跨设备同步，并自动迁移旧 localStorage 数据
+   - 使用 chrome.storage.local 存储 (favorite.js)，按扩展隔离、跨 www/live 子域共享；内存缓存 + onChanged 监听同步多标签
+   - 注意：local **不跨设备同步**，**真正卸载（移除后再添加）后会清空**；reload 不会清空
 
 4. 直播预览功能：
    - 鼠标悬停按需加载预览直播画面（已取消默认批量预加载，避免频繁请求卡顿）
@@ -31,10 +32,11 @@
    - 大屏预览：默认铺满整屏(100%)，支持浏览器全屏(F11)按钮、ESC 分级退出、右下角控件自动隐显
    - 三联屏：同一路视频用 captureStream 镜像并排，零缝隙拼接、共享解码不卡顿
    - 支持自定义氛围词条（含 TTS 语音）、为每个主播单独配置、开关词条显示
-   - 根据网络状况自动选择清晰度
+   - 大屏打开时按 `NetworkUtils.getAppropriateQuality()` 自适应清晰度；右下角 chip 可手动切换（菜单宽度与按钮等宽，仅 1 档时隐藏）
+   - 手动切清晰度：新流出画面后**续播 1.5s 再硬切**直播源（不再交叉淡入）；录制中、三联屏禁用
 
 5. 多路对比预览 (openComparePreview)：
-   - 卡片右上角复选框勾选最多 3 个不同直播间，顶部"对比预览"按钮打开
+   - 卡片右上角复选框勾选最多 3 个不同直播间，顶部「N 同时看」按钮打开（自 1.3.1 起，原名「对比预览(N)」；去图标、计数前置、`white-space:nowrap` 防挤）
    - 顶部"清除已选"按钮一键清空勾选 (ModalUI.clearCompare)；刷新列表 (refresh) 也会清除选中
    - 选中身份键用唯一的 roomUrl（避免 secUid 缺失时误判）
    - 网格布局复用三联屏样式（视频 height:100%/width:auto），竖屏无黑边、零缝隙拼接
@@ -44,7 +46,7 @@
    - 控件显隐用 visibility + opacity 双控（见下方注意事项第 8 条）
 
 6. 声音与音量：
-   - 顶部声音总开关（放音/静音）+ 全局音量记忆，使用 chrome.storage.sync 存储 (settings.js)
+   - 顶部声音总开关（放音/静音）+ 全局音量记忆，使用 chrome.storage.local 存储 (settings.js)
    - 悬浮预览、大屏预览声音状态互相同步
 
 7. 直播录制：
@@ -97,8 +99,8 @@ douyinfollowplugin/
 │   ├── modal.js        # 模态框模块，负责直播列表展示、搜索/排序/筛选、对比选择、加载三态
 │   ├── card.js         # 直播卡片模块，负责创建卡片、对比复选框、点击跳转
 │   ├── preview.js      # 预览模块：悬浮预览、大屏预览、三联屏、多路对比、录制
-│   ├── favorite.js     # 特别关心模块（chrome.storage.sync + 内存缓存）
-│   ├── settings.js     # 全局设置模块：音量/声音总开关（chrome.storage.sync）
+│   ├── favorite.js     # 特别关心模块（chrome.storage.local + 内存缓存）
+│   ├── settings.js     # 全局设置模块：音量/声音总开关（chrome.storage.local）
 │   ├── license.js      # PRO 授权：离线 ECDSA 验签、激活/解除、权益对比升级页
 │   ├── preload.js      # 预加载管理（按需）
 │   ├── monitor.js      # 资源监控模块
@@ -143,10 +145,15 @@ douyinfollowplugin/
 
 3. 验签与功能锁
    - 插件启动时 `LicenseManager.init()`（`content.js` 的 `Promise.all`）读取 `storage.local` 中的许可证并本地验签，决定 `isPro`。
-   - 功能锁点：`modal.js`（多路对比按钮）、`preview.js`（录制按钮、氛围词条配置/开关）。非 PRO 点击弹 `showUpgradePrompt()`。
+   - 功能锁点：`modal.js`（「N 同时看」按钮，原「对比预览」）、`preview.js`（录制按钮、氛围词条配置/开关）。非 PRO 点击弹 `showUpgradePrompt()`。
    - 免费保留：三联屏镜像、特别关心（无限）、资源监控。
 
-4. 改动须知
+4. 设备识别码（机器绑定）
+   - `getMachineId()` 先读 `storage.local` 缓存（reload 快路径）；缓存缺失时**由 `_computeFingerprint()` 确定性派生**——对 `navigator.platform`、`hardwareConcurrency`、`deviceMemory`、屏幕宽高/色深、`language`、`Intl.DateTimeFormat().resolvedOptions().timeZone`、`maxTouchPoints` 拼接后做 SHA-256，取前 32 位 hex 加 `fp-` 前缀；指纹接口失败兜底为随机值。
+   - 此举为修复「**插件被移除后再添加**会清空 `storage.local` → 重新生成的随机 UUID 与旧激活码 `payload.m` 不匹配 → 旧码失效」。改后重装能算出**同一个**设备码，旧激活码重新粘贴即可恢复 PRO。
+   - 注意：换设备/重装系统/重大浏览器变更（如显示器换分辨率、时区改动）仍可能导致指纹漂移；这种情况走「自动换绑」流程（服务端可用时）或重新签发。激活码绑定/验签逻辑（`_verify`/`activate`/`deactivate`）保持不变。
+
+5. 改动须知
    - 修改 `license.js` / `constants.js` 等源码后，必须 `npm run build` 才会进 `dist/`。
    - ⚠️ **改完一律用 `npm run release`（= build + sync），不要只 `npm run build`**。`npm run build` 只输出到根目录 `dist/`，**不会**更新发布包 `douyin_live_helper_plugin/`。若加载的是发布包目录，只 build 不 sync 会出现「重新加载插件却没生效」——因为发布包里的 `dist/content.js`、`css/style.css` 还是旧的。只改了 JS/CSS、想跳过重复构建时可单独 `npm run sync`。
    - 价格、客服微信、购买链接在 `constants.js` 的 `LICENSE` 常量配置。
@@ -202,11 +209,11 @@ douyinfollowplugin/
    - content.js: 插件入口文件，初始化菜单、特别关心与全局设置缓存
    - bridge.js: MAIN 世界脚本，复用抖音签名转发 feed/follow 请求
    - menu.js: 处理导航菜单的注入与持久化
-   - modal.js: 处理弹窗、直播列表、搜索/排序/筛选、对比选择、加载三态
+   - modal.js: 处理弹窗、直播列表、搜索/排序/筛选、对比选择、加载三态；统一 ESC 关闭顺序（PRO 弹窗→资源面板→大屏让位→关列表）
    - card.js: 处理直播卡片创建、对比复选框与点击跳转
-   - preview.js: 悬浮/大屏/三联屏/多路对比预览与录制
-   - favorite.js: 特别关心存储（chrome.storage.sync）
-   - settings.js: 音量/声音总开关存储（chrome.storage.sync）
+   - preview.js: 悬浮/大屏/三联屏/多路对比预览与录制；大屏「切清晰度」用「续播 1.5s 再硬切」（`_switchBigScreenQuality`）
+   - favorite.js: 特别关心存储（chrome.storage.local + 内存缓存）
+   - settings.js: 音量/声音总开关存储（chrome.storage.local + 内存缓存）
    - license.js: PRO 授权（离线 ECDSA 验签、激活/解除、权益对比升级页）
    - preload.js: 按需预加载管理
    - monitor.js: 资源监控
@@ -281,8 +288,8 @@ douyinfollowplugin/
 
 5. 重要更新及时记录到 CHANGELOG
 
-6. manifest 权限：`activeTab` + `storage`（特别关心与全局设置使用 chrome.storage.sync）；
-   host_permissions 为 `*://*.douyin.com/*`
+6. manifest 权限：`activeTab` + `storage`（**特别关心 / 设置 / 氛围词条 / 许可证 / 设备识别码全部使用 `chrome.storage.local`**，按扩展隔离、跨 www/live 子域共享，但不跨设备同步、真卸载会清空）；
+   host_permissions 为 `*://*.douyin.com/*`（在线订阅模式下额外含许可证服务器域名）
 
 7. 录制依赖浏览器 MediaRecorder（webm/vp8）、canvas.captureStream 与 Web Audio，
    仅在 Chromium 内核浏览器验证；合并录制为 canvas 拼接 + 多路音轨混音
@@ -291,6 +298,30 @@ douyinfollowplugin/
    显示 visibility:visible + opacity:1）。原因：Edge 全屏 top-layer 下，仅切换 opacity 时带 backdrop-filter
    的控件可能不重绘——元素真实 opacity 已为 1（可命中、可点击、光标变手指），但视觉仍透明。切换 visibility
    会强制重绘并移出命中测试。注：该方案待在出问题的 Edge 机器上实测确认
+
+9. 大屏「切清晰度」流程（`preview.js` `_switchBigScreenQuality`，自 1.3.1 起）：
+   - 后台用临时 `video`（`visibility:hidden`，叠在 v0 上）+ 新建 Hls 预拉目标流；新流 `canplay` 后 **`setTimeout(swap, 1500)`**，
+     这 1.5s 内旧流继续播放，**到点一次性硬切**直播源（不做透明度/音量渐变）。
+   - 切换瞬间：旧 video pause+remove、旧 Hls destroy；新 video 转为 flex 子元素（`visibility:visible`），按旧流当前 `muted/volume`
+     设音量；更新 `videos[0]`、`this.currentBigVideo`、`this.fullPreviewHlsInstances`。
+   - 禁用条件：`this.isRecording` 或 `videos.length !== 1`（三联屏）。`canplay` 未触发 8s 兜底直接切；致命 ERROR 未切前回滚。
+   - 弃用：原 `_crossfadeBigScreenQuality` 交叉淡入路径（透明度/音量双向 ramp 1500ms）。背景：淡入期间双解码 + 双解码音轨易触发
+     黑屏/闪缩/同步偏差，复杂且不稳定。
+
+10. 大屏「切清晰度」菜单宽度（`preview.js` `createQualityBtn`，自 1.3.1 起）：
+   - 菜单上弹用 `position:absolute; left:0; right:0; bottom:40px`，宽度自动等于按钮（去掉 `minWidth:72px`）；档位项 padding `8px 6px`，短文案居中。
+   - 仅一档可用时（`avail.length<=1`）按钮直接 `display:none`。
+
+11. ESC 关闭顺序（`modal.js` `disableDouyinShortcuts.keydownHandler`，自 1.3.1 起重排）：
+   1) `#dylh-overlay`（PRO 升级/会员信息弹窗）`remove()`；
+   2) `.resource-monitor-panel` 可见时 `ResourceMonitor.hidePanel()`；
+   3) 否则若大屏 `#dy-modal` / 对比 `#dy-compare-modal` / `document.fullscreenElement` 在，**让位**给各自的 ESC；
+   4) 都不在时关闭直播列表 `.live-modal`。
+   - 旧顺序在第 3 步前直接 `return`，导致叠在大屏之上的浮层 ESC 失效。把 1)/2) 提到 3) 之前即可全场景生效。
+   - 该 keydown 监听器在打开列表时注册（捕获阶段、`stopPropagation` 屏蔽抖音原快捷键），关列表时移除。
+
+12. 设备识别码生成：见 `## PRO 授权架构` 第 4 节「设备识别码（机器绑定）」。简言之——`getMachineId()` 缓存缺失时由
+    `_computeFingerprint()` 用稳定信号 SHA-256 确定性派生（`fp-` 前缀），重装后能算出同一标识，旧激活码继续生效。
 
 ## Chrome 系列浏览器测试
 
@@ -347,7 +378,7 @@ douyinfollowplugin/
 3. 点「加载已解压的扩展程序」→ 选目录
 4. 访问抖音网页版测试功能
 
-> 提示：特别关心、声音/音量设置使用 `chrome.storage.sync`。其**跨设备同步**需登录浏览器账号并开启同步功能；未登录时退化为本地存储，但跨 www/live 子域共享与基础功能仍正常。
+> 提示：特别关心、声音/音量、氛围词条、PRO 授权、设备识别码均使用 `chrome.storage.local`，按扩展隔离、跨 www/live 子域共享。**不跨设备同步**；扩展中心「重新加载」数据保留，「移除后再添加」会清空（重装后旧激活码可由确定性派生的设备码恢复，重新粘贴即可激活）。
 
 ## 扩展商店发布指南
 
