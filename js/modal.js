@@ -640,6 +640,10 @@ const ModalUI = {
             return;
         }
 
+        // 重渲染前硬重置循环片段流水线：中止在录、释放旧循环视频解码、清空排队/可见集（保留缓存）。
+        // 必须在 innerHTML 清空前——否则 video 已脱离 DOM 但仍在解码，造成解码泄漏。
+        PreloadManager.resetForRerender();
+
         container.innerHTML = '';
 
         // 重建视口观察器（内部会先断开上一轮）。root 取 .live-grid 的滚动祖先（内容区 overflow:auto）
@@ -703,7 +707,8 @@ const ModalUI = {
                     PreloadManager.release(live.roomUrl, cardPreview);
                 }
             });
-        }, { root: scrollRoot || null, rootMargin: '300px 0px', threshold: 0.01 });
+            // 严格只加载视口内：rootMargin 0（视口外不预取/不排队），threshold 0.01（任意像素进入即触发）
+        }, { root: scrollRoot || null, rootMargin: '0px', threshold: 0.01 });
     },
 
     /**

@@ -148,9 +148,31 @@ export const PreloadManager = {
         if (this.visible.get(roomUrl) === cardPreview) {
             this.visible.delete(roomUrl);
         }
+        // 离开视口：从排队中移除（严格只加载视口内 → 视口外不排队、不抢并发槽）
+        this.queue = this.queue.filter(it => it.live.roomUrl !== roomUrl);
+        if (this.status.get(roomUrl) === 'queued') this.status.delete(roomUrl);
         // 在录则中止（销毁实例、移除视频），避免悬空
         if (cardPreview && cardPreview._clipAbort) { try { cardPreview._clipAbort(); } catch (_) {} }
         this._removeLoopVideo(cardPreview);
+    },
+
+    /**
+     * 列表重渲染（搜索/筛选/排序）时硬重置流水线：中止在录、释放所有循环视频解码、
+     * 清空排队与可见集，使新视口卡片立即优先加载。**保留 preloadCache**，同主播再进视口秒显。
+     * 必须在 `container.innerHTML=''` 之前调用——video 脱离 DOM 不会自动停解码，须先 pause。
+     */
+    resetForRerender() {
+        // 先清队列：随后中止触发的 _pump() 找到空队列，不会再启动新加载
+        this.queue = [];
+        for (const [, card] of [...this.visible.entries()]) {
+            if (card && card._clipAbort) { try { card._clipAbort(); } catch (_) {} } // 中止在录
+            this._removeLoopVideo(card);                                              // 暂停+移除循环 video，释放解码
+        }
+        this.visible.clear();
+        // 清掉残留的 queued 状态键（已无队列项指向它们）
+        for (const [k, st] of [...this.status.entries()]) {
+            if (st === 'queued') this.status.delete(k);
+        }
     },
 
     /**

@@ -324,7 +324,7 @@ douyinfollowplugin/
     `_computeFingerprint()` 用稳定信号 SHA-256 确定性派生（`fp-` 前缀），重装后能算出同一标识，旧激活码继续生效。
 
 13. 视口播放门控（`modal.js` `_setupPlaybackObserver`，自 1.3.2 起）：
-    - 与既有 `_clipObserver`（rootMargin: 300px、threshold: 0.01——负责预加载/缓存调度）**解耦**，
+    - 与既有加载观察器 `_clipObserver`（负责预加载/缓存调度）**解耦**，
       新增一个独立的 `IntersectionObserver`（`rootMargin: 0px`、`threshold: [0, 1]`）只管「是否播放」。
     - 回调里 `entry.intersectionRatio >= 0.999` 视为完整可见 → `PreloadManager.resumeCard()`；否则 → `pauseCard()`。
       同时把 `cardPreview._shouldPlay = boolean` 写到卡片上。
@@ -332,7 +332,18 @@ douyinfollowplugin/
       `cardPreview._shouldPlay !== false`——处理「加载/录制完成时卡片正好不完全可见」的竞态
       （IO 不会自动再触发回调）。`pauseCard` 仍跳过 `_clipLoading=true` 的卡片，避免污染录制。
     - 效果：同屏播放路数严格 = 当前视口完全容纳数（典型 ~12）。滚动出去的卡片立即暂停解码，
-      未滚到的卡片即使已缓存也不播；缓存策略不变（300px 提前缓冲、不重下）。
+      未滚到的卡片即使已缓存也不播。
+
+14. 循环片段流水线 & 重渲染重置（`preload.js` + `modal.js`，自 1.3.3 起）：
+    - **重渲染硬重置**：`renderLiveList` 在 `container.innerHTML=''` **之前**调 `PreloadManager.resetForRerender()`——
+      先清 `queue`（避免中止触发的 `_pump()` 再启动加载），再遍历 `visible` 中止在录 `_clipAbort()` + `_removeLoopVideo()`
+      释放解码，最后清 `visible` 与残留 `queued` 状态。**保留 `preloadCache`**。
+      必须在 innerHTML 清空前调用，否则 `<video>` 已脱离 DOM 但仍解码（游离解码泄漏）。
+    - **严格视口加载**：`_setupClipObserver` 的 `rootMargin` 已从 `300px` 收紧到 `0`——视口外不预取/不排队；
+      `threshold: 0.01` 保留（相交即加载）；`CLIP_SETTLE_MS` 停稳延时保留（快速滚过不拉流，命中缓存仍即时挂）。
+    - **离屏踢队列**：`release()` 除中止在录、移除循环视频外，新增从 `queue` 过滤掉该 room、清其 `queued` 状态，
+      使排队列表持续 = 当前视口（天然优先视口，不止重渲染那一刻）。
+    - **未改**：`MAX_CONCURRENT` 并发上限；缓存保留（离屏只释放解码、留 blob，靠 LRU `MAX_CACHE=120` 优先淘汰离屏）。
 
 ## Chrome 系列浏览器测试
 
