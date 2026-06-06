@@ -248,9 +248,12 @@ export const PreloadManager = {
             try { if (hls) { hls.stopLoad(); hls.destroy(); hls = null; } } catch (_) {}
             video.loop = true;
             video.src = blobUrl;
-            video.play().catch(() => {});
             cardPreview._clipLoading = false;
             cardPreview._clipAbort = null;
+            // 视口播放门控：录制完成时卡片若不完全可见则保持暂停（默认 true 兼容观察器未启用场景）
+            if (cardPreview._shouldPlay !== false) {
+                video.play().catch(() => {});
+            }
             this._finishLoad(roomUrl, true, null, blobUrl, live, aspect, size);
         };
 
@@ -421,7 +424,10 @@ export const PreloadManager = {
         cardPreview._clipVideo = video;
         // 横竖屏渲染：竖屏铺满；横屏完整居中 + 上下模糊填充
         StyleUtils.applyMediaOrientation(cardPreview, video, StyleUtils.isLandscapeRatio(cached.aspect));
-        video.play().catch(() => {});
+        // 视口播放门控：仅完全可见时才开播
+        if (cardPreview._shouldPlay !== false) {
+            video.play().catch(() => {});
+        }
     },
 
     /**
@@ -459,7 +465,8 @@ export const PreloadManager = {
      * @param {HTMLElement} cardPreview
      */
     resumeCard(cardPreview) {
-        const v = cardPreview && cardPreview._clipVideo;
+        if (!cardPreview || cardPreview._shouldPlay === false) return;
+        const v = cardPreview._clipVideo;
         if (v) { v.muted = true; v.volume = 0; v.play().catch(() => {}); }
     },
 

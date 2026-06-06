@@ -323,6 +323,17 @@ douyinfollowplugin/
 12. 设备识别码生成：见 `## PRO 授权架构` 第 4 节「设备识别码（机器绑定）」。简言之——`getMachineId()` 缓存缺失时由
     `_computeFingerprint()` 用稳定信号 SHA-256 确定性派生（`fp-` 前缀），重装后能算出同一标识，旧激活码继续生效。
 
+13. 视口播放门控（`modal.js` `_setupPlaybackObserver`，自 1.3.2 起）：
+    - 与既有 `_clipObserver`（rootMargin: 300px、threshold: 0.01——负责预加载/缓存调度）**解耦**，
+      新增一个独立的 `IntersectionObserver`（`rootMargin: 0px`、`threshold: [0, 1]`）只管「是否播放」。
+    - 回调里 `entry.intersectionRatio >= 0.999` 视为完整可见 → `PreloadManager.resumeCard()`；否则 → `pauseCard()`。
+      同时把 `cardPreview._shouldPlay = boolean` 写到卡片上。
+    - `preload.js` 的 `attachLoop` / `_startLoad.finalizeLoop` / `resumeCard` 在调用 `video.play()` 前检查
+      `cardPreview._shouldPlay !== false`——处理「加载/录制完成时卡片正好不完全可见」的竞态
+      （IO 不会自动再触发回调）。`pauseCard` 仍跳过 `_clipLoading=true` 的卡片，避免污染录制。
+    - 效果：同屏播放路数严格 = 当前视口完全容纳数（典型 ~12）。滚动出去的卡片立即暂停解码，
+      未滚到的卡片即使已缓存也不播；缓存策略不变（300px 提前缓冲、不重下）。
+
 ## Chrome 系列浏览器测试
 
 本插件兼容主流 Chromium 内核浏览器。各浏览器"扩展管理入口"和"开发者模式开关位置"不同，下表先速查、后附详细步骤。

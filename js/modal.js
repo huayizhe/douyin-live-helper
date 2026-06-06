@@ -100,6 +100,7 @@ const ModalUI = {
                 if (modal) {
                     this.enableDouyinShortcuts();
                     this._teardownClipObserver();
+                    this._teardownPlaybackObserver();
                     this._teardownGridResize();
                     PreloadManager.visible.clear();
                     modal.remove();
@@ -460,6 +461,7 @@ const ModalUI = {
                 // 恢复抖音快捷键
                 this.enableDouyinShortcuts();
                 this._teardownClipObserver();
+                this._teardownPlaybackObserver();
                 this._teardownGridResize();
                 PreloadManager.visible.clear();
                 modal.remove();
@@ -641,7 +643,9 @@ const ModalUI = {
         container.innerHTML = '';
 
         // 重建视口观察器（内部会先断开上一轮）。root 取 .live-grid 的滚动祖先（内容区 overflow:auto）
-        this._setupClipObserver(container.parentElement || null);
+        const scrollRoot = container.parentElement || null;
+        this._setupClipObserver(scrollRoot);
+        this._setupPlaybackObserver(scrollRoot);
 
         list.forEach((live, index) => {
             // 截图保留依赖 live.capturedPreview（在 card.js 中作为背景图优先使用）
@@ -664,6 +668,7 @@ const ModalUI = {
             if (cardPreview) {
                 cardPreview._live = live;
                 if (this._clipObserver) this._clipObserver.observe(cardPreview);
+                if (this._playbackObserver) this._playbackObserver.observe(cardPreview);
             }
 
             container.appendChild(card);
@@ -709,6 +714,40 @@ const ModalUI = {
         if (this._clipObserver) {
             this._clipObserver.disconnect();
             this._clipObserver = null;
+        }
+    },
+
+    /**
+     * 视口播放门控：仅**完整可见**的卡片（threshold:1）才播放，部分/全部被滚动裁切的一律暂停。
+     * 与 `_clipObserver` 解耦——加载/缓存仍按更宽的 rootMargin 推进（300px 提前缓冲），
+     * 但播放只在严格视口内进行，保证最多同时播放当前视口里能完全容纳的那些（典型 ~12 路）。
+     * @private
+     */
+    _setupPlaybackObserver(scrollRoot) {
+        this._teardownPlaybackObserver();
+        if (typeof IntersectionObserver === 'undefined') return;
+        this._playbackObserver = new IntersectionObserver((entries) => {
+            entries.forEach(entry => {
+                const cardPreview = entry.target;
+                // intersectionRatio 接近 1 视为完整可见（容忍亚像素抖动）
+                const fullyVisible = entry.isIntersecting && entry.intersectionRatio >= 0.999;
+                // 在卡片上标记期望播放状态，preload.js 的 finalizeLoop/attachLoop 在挂上视频后会读它
+                // 以处理「加载完成时正好不完全可见」的竞态（IO 不会自动再触发一次回调）
+                cardPreview._shouldPlay = fullyVisible;
+                if (fullyVisible) PreloadManager.resumeCard(cardPreview);
+                else PreloadManager.pauseCard(cardPreview);
+            });
+        }, { root: scrollRoot || null, rootMargin: '0px', threshold: [0, 1] });
+    },
+
+    /**
+     * 断开播放门控观察器。
+     * @private
+     */
+    _teardownPlaybackObserver() {
+        if (this._playbackObserver) {
+            this._playbackObserver.disconnect();
+            this._playbackObserver = null;
         }
     },
 

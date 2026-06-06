@@ -5,6 +5,18 @@
 
 ---
 
+## [1.3.2] - 2026-06-06
+
+### 新增
+- **视口播放门控**（`modal.js` 新增 `_setupPlaybackObserver`）：直播墙里仅**完整可见**的卡片（intersectionRatio ≥ 0.999）才播放循环视频；任何被滚动裁切的卡片立即暂停。这意味着同屏播放路数被严格限制为当前视口能完全容纳的卡片数（典型 12 路上下），其余卡片只占内存不占解码。与既有 `_clipObserver`（rootMargin: 300px 提前加载）解耦——加载/缓存策略不变（提前缓冲、滚回不重下），仅"是否播放"被收紧。
+- 配套：preload.js 的 `attachLoop` / `finalizeLoop` / `resumeCard` 在播放前检查 `cardPreview._shouldPlay`，处理「加载完成时卡片正好不完全可见」的竞态（IntersectionObserver 不会自动再触发）。
+
+### 变更
+- **会员信息弹窗去掉「关闭」按钮**（`license.js` `_statusHTML`）：右上角已有 `×` 关闭，按钮行重复。去掉后按钮行变为「立即续费 / 解除本设备激活」两项（或终身套餐时仅「解除本设备激活」一项），不再拥挤。
+- **「解除本设备激活」按钮不再换行**（`css/style.css` `.dylh-dialog-btn-danger`）：增加 `white-space: nowrap`、`padding` 从 `10px 0` 改为 `10px 12px`，配合上一条「去关闭按钮」后剩余宽度足够，文案永远单行。
+
+---
+
 ## [1.3.1] - 2026-06-06
 
 ### 变更

@@ -630,13 +630,14 @@ html[dark="true"] .tab-follow-live .follow-live-icon {
 
 .dylh-dialog-btn-danger {
   flex: 1;
-  padding: 10px 0;
+  padding: 10px 12px;
   border-radius: 8px;
   border: 1px solid rgba(220, 53, 69, 0.5);
   cursor: pointer;
   font-size: 14px;
   background: transparent;
   color: #e55;
+  white-space: nowrap;
   transition: background 0.2s;
 }
 .dylh-dialog-btn-danger:hover { background: rgba(220, 53, 69, 0.12); }

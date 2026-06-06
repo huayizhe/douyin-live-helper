@@ -333,7 +333,6 @@ export const LicenseManager = {
                 <div class="dylh-dialog-btn-row" style="margin-top:20px">
                     ${this.plan !== 'lifetime' ? `<button id="dylh-renew-btn" class="dylh-dialog-btn-primary">立即续费</button>` : ''}
                     <button id="dylh-deactivate-btn" class="dylh-dialog-btn-danger">解除本设备激活</button>
-                    <button id="dylh-close-btn2" class="dylh-dialog-btn-secondary">关闭</button>
                 </div>
                 <div id="dylh-msg" class="dylh-dialog-msg"></div>
                 <div class="dylh-dialog-hint">换新设备？在新设备「激活 PRO」里粘贴本授权即可自动换绑</div>
@@ -398,7 +397,6 @@ export const LicenseManager = {
     _bindDialog(overlay) {
         const close = () => { this.stopPoll(); overlay.remove(); };
         overlay.querySelector('#dylh-close-btn')?.addEventListener('click', close);
-        overlay.querySelector('#dylh-close-btn2')?.addEventListener('click', close);
 
         const msgEl = overlay.querySelector('#dylh-msg');
         const setMsg = (t, type) => {
