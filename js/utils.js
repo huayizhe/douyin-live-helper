@@ -690,6 +690,7 @@ const HLSUtils = {
     createPreloadConfig() {
         return this.createConfig({
             // 预加载特定的配置
+            lowLatencyMode: false,  // 缩略图录制不需要低延迟，关掉省 partial-segment 请求开销
             maxBufferLength: 10,
             maxMaxBufferLength: 15,
             maxBufferSize: 15 * 1000 * 1000

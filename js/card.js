@@ -6,6 +6,7 @@ import { Logger } from './logger.js';
 import { DOMUtils } from './utils.js';
 import { PreviewManager } from './preview.js';
 import { FavoriteManager } from './favorite.js';
+import { StatsManager } from './stats.js';
 
 // 「已预览」角标开关：自动循环预览上线后该角标已冗余，默认隐藏（代码保留，置 true 可恢复）
 const SHOW_PREVIEW_BADGE = false;
@@ -71,6 +72,21 @@ const LiveCard = {
 
         const isFav = FavoriteManager.isFavorite(live.secUid);
 
+        // 本周观看角标：看过才显示（置于序号下方，左上角同款样式）
+        const weekViews = StatsManager.getWeekCount(live.secUid);
+        const viewsBadge = weekViews > 0 ? `
+                <div class="week-views" title="本周观看次数" style="
+                    position: absolute;
+                    top: 34px;
+                    left: 8px;
+                    background: rgba(0, 0, 0, 0.55);
+                    color: #fff;
+                    padding: 2px 8px;
+                    border-radius: 4px;
+                    font-size: 11px;
+                    z-index: 4;
+                ">本周看 ${weekViews} 次</div>` : '';
+
         // 全沉浸卡片：整张卡=视频区(3:4)，信息条压在视频底部、白字 + 淡渐变蒙版
         return `
             <div class="live-preview" style="
@@ -94,6 +110,7 @@ const LiveCard = {
                     font-size: 12px;
                     z-index: 4;
                 ">${displayIndex}</div>
+                ${viewsBadge}
                 ${previewBadge}
                 <div class="compare-hit" title="勾选加入对比预览" style="
                     position: absolute;

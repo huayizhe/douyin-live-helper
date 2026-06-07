@@ -12,6 +12,7 @@ import { TOAST, LIVE_QUALITY } from './constants.js';
 import { SettingsManager } from './settings.js';
 import { LicenseManager } from './license.js';
 import { AtmosphereManager } from './atmosphere.js';
+import { StatsManager } from './stats.js';
 
 // 确保 HLS.js 可用
 const HLS = window.Hls;
@@ -234,17 +235,15 @@ wow，好热闹;
             isHovering = true;
             Logger.log('开始预览:', live.anchor);
 
-            // 悬浮即暂停循环片段，改播这一路的真·实时流（最新画面 + 可出声）
-            PreloadManager.pauseCard(cardPreview);
-            // A：用户停滚专注这一路，暂停启动新的片段预加载，带宽/CPU 让给实时流
-            PreloadManager.pauseLoading('hover');
-
-            // 短延迟防快速划过误加载
+            // 短延迟防快速划过误触：暂停循环/暂停预加载/切实时流统一推迟到停留 ≥200ms 后再做，
+            // 否则鼠标横扫一排卡片会瞬时停掉每一路循环、反复卡住整条预加载。
             this.previewTimer = setTimeout(() => {
-                if (isHovering && live.streamUrlHlsMap) {
-                    loadingEl.style.display = 'block';
-                    this.startStreamPreview(cardPreview, live, loadingEl);
-                }
+                if (!isHovering || !live.streamUrlHlsMap) return;
+                // 真正停留专注这一路：暂停循环片段、暂停启动新片段预加载，带宽/CPU 让给实时流
+                PreloadManager.pauseCard(cardPreview);
+                PreloadManager.pauseLoading('hover');
+                loadingEl.style.display = 'block';
+                this.startStreamPreview(cardPreview, live, loadingEl);
             }, 200);
         });
 
@@ -267,6 +266,8 @@ wow，好热闹;
     async startStreamPreview(cardPreview, live, loadingEl) {
         try {
             this.currentLive = live;
+            // 观看统计：悬浮切实时流即开始一次会话（停留 ≥3s 才计数）
+            StatsManager.startSession(live && live.secUid);
             this.videoElement = document.createElement('video');
             Object.assign(this.videoElement.style, {
                 width: '100%',
@@ -535,6 +536,9 @@ wow，好热闹;
      * @param {HTMLElement} loadingEl - 加载动画元素
      */
     clearPreview(cardPreview, live, videoElement, loadingEl) {
+
+        // 观看统计：结束本路会话（悬浮结束 / 退出大屏都经此）
+        if (live) StatsManager.endSession(live.secUid);
 
         // 清除定时器
         if (this.previewTimer) {
@@ -812,6 +816,8 @@ wow，好热闹;
      */
     openFullPreview(cardPreview, live) {
         this.currentLive = live;
+        // 观看统计：打开大屏即开始一次会话（退出大屏时 clearPreview 会结算）
+        StatsManager.startSession(live && live.secUid);
         // B：大屏看真直播时背后整墙不可见，暂停全部片段加载 + 循环播放（先暂停，再清掉可能残留的 hover 标记，
         // 因 fullscreen 仍在集合中故不会触发加载；避免点开大屏时 mouseleave 不触发导致加载被永久挂起）
         PreloadManager.pauseLoading('fullscreen');
@@ -1757,6 +1763,8 @@ wow，好热闹;
         const volumeBtn = this.createVolumeBtn(video);
         // 添加浏览器全屏按钮（在音量按钮右侧）
         const fullscreenBtn = this.createBrowserFullscreenBtn(previewContainer);
+        // 添加画中画按钮
+        const pipBtn = this.createPipBtn();
         // 添加三联屏开关按钮
         const tripleScreenBtn = this.createTripleScreenBtn(previewContainer);
         // 添加氛围词条配置按钮
@@ -1772,6 +1780,7 @@ wow，好热闹;
         if (live) controlContainer.appendChild(this.createQualityBtn(previewContainer, live));
         controlContainer.appendChild(volumeBtn);
         controlContainer.appendChild(fullscreenBtn);
+        controlContainer.appendChild(pipBtn);
         controlContainer.appendChild(tripleScreenBtn);
         controlContainer.appendChild(etmosphereEntryConfigBtn);
         controlContainer.appendChild(etmosphereEntryToggleBtn);
@@ -1864,6 +1873,37 @@ wow，好热闹;
             if (document.fullscreenElement) document.exitFullscreen();
         };
 
+        return btn;
+    },
+
+    /**
+     * 创建画中画（PiP）按钮：把当前大屏主视频钻进系统小窗，便于一边看播一边翻别的页面。
+     * 作用于 this.currentBigVideo（切清晰度后会换元素，故运行时动态取）；浏览器不支持则隐藏。
+     * @returns {HTMLElement}
+     */
+    createPipBtn() {
+        const btn = document.createElement('div');
+        btn.setAttribute('title', '画中画');
+        this.createCtrlBtnBaseStyle(btn);
+        btn.innerHTML = `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="3" y="4" width="18" height="15" rx="2"/><rect x="12" y="11" width="7" height="6" rx="1" fill="#fff" stroke="none"/>
+        </svg>`;
+        // 浏览器不支持 PiP 则不显示
+        if (!document.pictureInPictureEnabled) { btn.style.display = 'none'; return btn; }
+
+        btn.addEventListener('click', async (e) => {
+            e.stopPropagation();
+            try {
+                if (document.pictureInPictureElement) {
+                    await document.exitPictureInPicture();
+                    return;
+                }
+                const v = this.currentBigVideo;
+                if (!v) return;
+                v.disablePictureInPicture = false; // 创建时默认禁用，进 PiP 前打开
+                await v.requestPictureInPicture();
+            } catch (_) { /* 用户取消/不支持：静默 */ }
+        });
         return btn;
     },
 

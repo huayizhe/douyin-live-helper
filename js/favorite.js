@@ -81,6 +81,32 @@ const FavoriteManager = {
             this.addFavorite(secUid);
         }
         return !isFav;
+    },
+
+    /**
+     * 导出特别关心为 JSON 字符串（用于备份/搬家）
+     * @returns {string}
+     */
+    exportData() {
+        return JSON.stringify({ v: 1, exportedAt: Date.now(), favorites: [...this._cache] });
+    },
+
+    /**
+     * 从导出的 JSON 文本导入特别关心
+     * @param {string} text - exportData() 产出的 JSON
+     * @param {'merge'|'replace'} [mode='merge'] - merge=合并去重；replace=覆盖
+     * @returns {number} 导入后特别关心总数
+     */
+    importData(text, mode = 'merge') {
+        let parsed;
+        try { parsed = JSON.parse(text); } catch { throw new Error('文件格式错误，不是有效的 JSON'); }
+        const list = Array.isArray(parsed) ? parsed : (parsed && parsed.favorites);
+        if (!Array.isArray(list)) throw new Error('文件内容不是特别关心数据');
+        const incoming = list.filter(x => typeof x === 'string' && x);
+        const next = mode === 'replace' ? incoming : [...this._cache, ...incoming];
+        this._cache = [...new Set(next)];   // 去重
+        chrome.storage.local.set({ [this.STORAGE_KEY]: this._cache });
+        return this._cache.length;
     }
 };
 

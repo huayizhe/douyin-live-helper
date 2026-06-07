@@ -99,8 +99,9 @@ douyinfollowplugin/
 │   ├── modal.js        # 模态框模块，负责直播列表展示、搜索/排序/筛选、对比选择、加载三态
 │   ├── card.js         # 直播卡片模块，负责创建卡片、对比复选框、点击跳转
 │   ├── preview.js      # 预览模块：悬浮预览、大屏预览、三联屏、多路对比、录制
-│   ├── favorite.js     # 特别关心模块（chrome.storage.local + 内存缓存）
+│   ├── favorite.js     # 特别关心模块（chrome.storage.local + 内存缓存；含导入/导出）
 │   ├── settings.js     # 全局设置模块：音量/声音总开关（chrome.storage.local）
+│   ├── stats.js        # 本地观看统计：每主播本周次数/时长（chrome.storage.local，按 ISO 周清零）
 │   ├── license.js      # PRO 授权：离线 ECDSA 验签、激活/解除、权益对比升级页
 │   ├── preload.js      # 预加载管理（按需）
 │   ├── monitor.js      # 资源监控模块
@@ -212,8 +213,9 @@ douyinfollowplugin/
    - modal.js: 处理弹窗、直播列表、搜索/排序/筛选、对比选择、加载三态；统一 ESC 关闭顺序（PRO 弹窗→资源面板→大屏让位→关列表）
    - card.js: 处理直播卡片创建、对比复选框与点击跳转
    - preview.js: 悬浮/大屏/三联屏/多路对比预览与录制；大屏「切清晰度」用「续播 1.5s 再硬切」（`_switchBigScreenQuality`）
-   - favorite.js: 特别关心存储（chrome.storage.local + 内存缓存）
+   - favorite.js: 特别关心存储（chrome.storage.local + 内存缓存；exportData/importData）
    - settings.js: 音量/声音总开关存储（chrome.storage.local + 内存缓存）
+   - stats.js: 本地观看统计（本周次数/时长；startSession/endSession/getWeekCount）
    - license.js: PRO 授权（离线 ECDSA 验签、激活/解除、权益对比升级页）
    - preload.js: 按需预加载管理
    - monitor.js: 资源监控
@@ -344,6 +346,31 @@ douyinfollowplugin/
     - **离屏踢队列**：`release()` 除中止在录、移除循环视频外，新增从 `queue` 过滤掉该 room、清其 `queued` 状态，
       使排队列表持续 = 当前视口（天然优先视口，不止重渲染那一刻）。
     - **未改**：`MAX_CONCURRENT` 并发上限；缓存保留（离屏只释放解码、留 blob，靠 LRU `MAX_CACHE=120` 优先淘汰离屏）。
+
+15. 录制并发与参数（`preload.js`，自 1.4.0 起）：调度真正用的是 `MAX_CONCURRENT_RECORD`（默认 3、弱机 2，
+    `_pump` 以它为上限）；每路加载=一路 `MediaRecorder` 编码，故它即「同时编码上限」，是削峰关键。`MAX_CONCURRENT`
+    仅作硬上限常量。`CLIP_BITRATE=400000`、`RECORD_MS=5000`、预加载 HLS 配置 `lowLatencyMode:false`。
+    监控面板「上限」展示读 `MAX_CONCURRENT_RECORD`。
+
+16. 分批滚动加载（`modal.js`，自 1.4.0 起）：`renderLiveList` 首批 `RENDER_BATCH=60`，末尾 `.live-grid-sentinel`
+    哨兵 + `_batchObserver`（rootMargin 600px）滚到底追加下一批；`_appendCards` 复用建卡逻辑并对每张
+    `observe` 两个视口观察器；`_teardownBatchObserver` 在重渲染/ESC 关/X 关处断开。不支持 IO 时一次性补齐。
+
+17. 悬浮防误触（`preview.js` `setupPreview`，自 1.4.0 起）：`pauseCard` + `pauseLoading('hover')` 已并入
+    既有 200ms 去抖回调（原先在 mouseenter 立即执行）。快速掠过不再停循环、不卡预加载。
+
+18. 大屏画中画（`preview.js` `createPipBtn`，自 1.4.0 起）：作用于 `this.currentBigVideo`（切清晰度后动态取），
+    点击时把该视频 `disablePictureInPicture=false` 再 `requestPictureInPicture()`；`document.pictureInPictureEnabled`
+    为假则按钮隐藏。仅大屏单路控制栏添加。
+
+19. 本地观看统计（`stats.js`，自 1.4.0 起）：`startSession/endSession`（停留 ≥`MIN_COUNT_SEC`=3s 才计一次、累加时长，
+    按 ISO 周键 `_weekKey()` 自动清零）；埋点在 `preview.js` 的 `startStreamPreview`/`openFullPreview`（start）与
+    `clearPreview`（end）。`card.js` 用 `getWeekCount` 渲染「本周看 N 次」角标。`modal.js` 排序三态
+    `this.sortMode`（default/popularity/mostWatched）经统一的 `_getViewList()`/`_rerenderView()` 生效。
+
+20. 特别关心导入/导出（`favorite.js` `exportData`/`importData` + `modal.js` `createBackupButton`，自 1.4.0 起）：
+    「备份」按钮弹 body 级固定定位菜单（避开 header `overflow:hidden` 裁剪）；导出 Blob 下载、导入合并去重后
+    `_rerenderView()` 刷新心标。
 
 ## Chrome 系列浏览器测试
 

@@ -12,12 +12,18 @@ import { PreloadManager } from './preload.js';
 import { SettingsManager } from './settings.js';
 import { ToastManager } from './toast.js';
 import { LicenseManager } from './license.js';
+import { StatsManager } from './stats.js';
 
 const ModalUI = {
     /**
      * 添加快捷键处理器引用
      */
     keydownHandler: null,
+
+    /**
+     * 当前排序模式：'default'（接口顺序）| 'popularity'（人气）| 'mostWatched'（最常看·本周）
+     */
+    sortMode: 'default',
 
     /**
      * 排序状态
@@ -101,6 +107,7 @@ const ModalUI = {
                     this.enableDouyinShortcuts();
                     this._teardownClipObserver();
                     this._teardownPlaybackObserver();
+                    this._teardownBatchObserver();
                     this._teardownGridResize();
                     PreloadManager.visible.clear();
                     modal.remove();
@@ -215,6 +222,7 @@ const ModalUI = {
         const compareButton = this.createCompareButton(isDarkMode);        // 对比预览
         const clearCompareButton = this.createClearCompareButton(isDarkMode); // 清除已选
         const scrollTopButton = this.createScrollTopButton(isDarkMode);    // 回到顶部按钮
+        const backupButton = this.createBackupButton(isDarkMode);        // 备份（导入/导出特别关心）
         const resourceButton = this.createResourceButton(isDarkMode);     // 资源按钮
         const licenseBtn = LicenseManager.createLicenseBtn(isDarkMode);  // PRO 授权按钮
         const liveCount = this.createLiveCountElement(isDarkMode);   // 直播数量显示
@@ -233,14 +241,14 @@ const ModalUI = {
             overflow: 'hidden'
         };
         [favoriteButton, sortButton, refreshButton, globalSoundBtn,
-         compareButton, clearCompareButton, scrollTopButton, resourceButton, licenseBtn, liveCount]
+         compareButton, clearCompareButton, scrollTopButton, backupButton, resourceButton, licenseBtn, liveCount]
             .forEach(btn => { if (btn) Object.assign(btn.style, MENU_BTN); });
         // PRO 按钮：与其它按钮等大（badge 由 CSS 填满整框），去掉左右 padding 让金色 badge 占满 104px
         Object.assign(licenseBtn.style, { display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '0' });
 
         // 强迫症：不足 4 个字的标签撑成 4 字宽（两端对齐＝中间空格填充观感），>=4 字不动。
         // 声音按钮会重建 innerHTML，其 updateIcon 内已自带 _justifyShortLabel，这里不重复处理。
-        [favoriteButton, sortButton, refreshButton, compareButton, clearCompareButton, scrollTopButton, resourceButton, globalSoundBtn]
+        [favoriteButton, sortButton, refreshButton, compareButton, clearCompareButton, scrollTopButton, backupButton, resourceButton, globalSoundBtn]
             .forEach(btn => { if (btn) this._justifyShortLabel(btn.querySelector('span')); });
 
         // 搜索框：宽度 = 两个按钮宽 + 一个间隔（与按钮网格对齐显得整齐），高度对齐 36
@@ -265,9 +273,10 @@ const ModalUI = {
         leftGroup.appendChild(compareButton);  // 6. 对比预览
         leftGroup.appendChild(clearCompareButton); // 7. 清除已选
         leftGroup.appendChild(scrollTopButton);// 8. 回到顶部按钮
-        leftGroup.appendChild(resourceButton); // 9. 资源按钮
-        leftGroup.appendChild(licenseBtn);     // 10. PRO 授权按钮
-        leftGroup.appendChild(liveCount);      // 11. 直播数量显示
+        leftGroup.appendChild(backupButton);   // 9. 备份（导入/导出特别关心）
+        leftGroup.appendChild(resourceButton); // 10. 资源按钮
+        leftGroup.appendChild(licenseBtn);     // 11. PRO 授权按钮
+        leftGroup.appendChild(liveCount);      // 12. 直播数量显示
 
         // 组装页眉
         header.appendChild(leftGroup);         // 左侧按钮组
@@ -358,44 +367,9 @@ const ModalUI = {
                 ? (isDarkMode ? '#fff' : '#ff2c55')
                 : (isDarkMode ? '#fff' : '#666');
 
-            // 获取当前列表并筛选
-            const container = document.querySelector('.live-grid');
-            if (!container || !this.currentLiveList) return;
-
-            // 获取搜索条件
-            const searchInput = document.querySelector('.live-modal-content input');
-            const searchText = searchInput?.value.toLowerCase().trim() || '';
-
-            // 获取排序状态
-            const sortButton = document.querySelector('.sort-button');
-            const isSortedByPopularity = sortButton && sortButton.querySelector('span').textContent === '默认';
-
-            // 应用筛选条件
-            let filteredList = this.currentLiveList;
-
-            // 应用搜索筛选
-            if (searchText) {
-                filteredList = filteredList.filter(live => 
-                    live.anchor.toLowerCase().includes(searchText) ||
-                    live.title.toLowerCase().includes(searchText)
-                );
-            }
-
-            // 应用特别关心筛选
-            if (this.isFiltering) {
-                filteredList = filteredList.filter(live => FavoriteManager.isFavorite(live.secUid));
-            }
-
-            // 应用排序
-            if (isSortedByPopularity) {
-                filteredList = [...filteredList].sort((a, b) => b.viewerCount - a.viewerCount);
-            }
-
-            // 更新直播人数显示
-            const modal = DOMUtils.findElement('.live-modal-content');
-            this.updateLiveCount(modal, filteredList.length);
-            
-            this.renderLiveList(filteredList, container, isDarkMode);
+            // 统一按当前「搜索 + 特别关心 + 排序」重渲染
+            if (!this.currentLiveList) return;
+            this._rerenderView();
         });
 
         return button;
@@ -462,6 +436,7 @@ const ModalUI = {
                 this.enableDouyinShortcuts();
                 this._teardownClipObserver();
                 this._teardownPlaybackObserver();
+                this._teardownBatchObserver();
                 this._teardownGridResize();
                 PreloadManager.visible.clear();
                 modal.remove();
@@ -634,6 +609,35 @@ const ModalUI = {
      * @param {Element} container - 容器元素
      * @param {boolean} isDarkMode - 是否暗色模式
      */
+    /** 分批渲染每批卡片数（大列表防一次性建几百个 DOM 卡死主线程） */
+    RENDER_BATCH: 60,
+
+    /**
+     * 按当前「搜索 + 特别关心筛选 + 排序模式」从完整列表算出要展示的列表。
+     * 过滤在 currentLiveList 数据数组上做（快、不漏匹配），渲染层再分批挂载。
+     * 搜索/筛选/排序三处入口统一调用本方法，消除原先重复逻辑。
+     */
+    _getViewList() {
+        let list = this.currentLiveList || [];
+        const searchInput = document.querySelector('.live-modal-content input');
+        const q = (searchInput?.value || '').toLowerCase().trim();
+        if (q) list = list.filter(l => (l.anchor || '').toLowerCase().includes(q) || (l.title || '').toLowerCase().includes(q));
+        if (this.isFiltering) list = list.filter(l => FavoriteManager.isFavorite(l.secUid));
+        if (this.sortMode === 'popularity') list = [...list].sort((a, b) => (b.viewerCount || 0) - (a.viewerCount || 0));
+        else if (this.sortMode === 'mostWatched') list = [...list].sort((a, b) => StatsManager.getWeekCount(b.secUid) - StatsManager.getWeekCount(a.secUid));
+        return list;
+    },
+
+    /** 按当前视图状态重渲染列表（搜索/筛选/排序/导入后统一调用）。 */
+    _rerenderView() {
+        const container = document.querySelector('.live-grid');
+        if (!container) return;
+        const list = this._getViewList();
+        const modal = DOMUtils.findElement('.live-modal-content');
+        this.updateLiveCount(modal, list.length);
+        this.renderLiveList(list, container, StyleUtils.isDarkMode());
+    },
+
     renderLiveList(list, container, isDarkMode) {
         if (!container) {
             Logger.error('未找到直播列表容器');
@@ -643,6 +647,7 @@ const ModalUI = {
         // 重渲染前硬重置循环片段流水线：中止在录、释放旧循环视频解码、清空排队/可见集（保留缓存）。
         // 必须在 innerHTML 清空前——否则 video 已脱离 DOM 但仍在解码，造成解码泄漏。
         PreloadManager.resetForRerender();
+        this._teardownBatchObserver();
 
         container.innerHTML = '';
 
@@ -651,9 +656,36 @@ const ModalUI = {
         this._setupClipObserver(scrollRoot);
         this._setupPlaybackObserver(scrollRoot);
 
-        list.forEach((live, index) => {
-            // 截图保留依赖 live.capturedPreview（在 card.js 中作为背景图优先使用）
-            const card = LiveCard.create(live, isDarkMode, index);
+        // 分批渲染：先建首批，其余滚到底再追加（搜索结果少则一批建完；纯浏览大列表不冻结）
+        this._pendingList = list || [];
+        this._renderCursor = 0;
+        this._renderContainer = container;
+        this._renderDark = isDarkMode;
+        this._setupBatchObserver(scrollRoot);
+        this._renderNextBatch();
+        // 不支持 IO 时无哨兵触发，直接补齐全部
+        if (!this._batchObserver) {
+            while (this._renderCursor < this._pendingList.length) this._renderNextBatch();
+        }
+    },
+
+    /** 渲染下一批卡片，并维护末尾哨兵（渲染完则移除哨兵）。 */
+    _renderNextBatch() {
+        const container = this._renderContainer;
+        if (!container) return;
+        const list = this._pendingList || [];
+        const start = this._renderCursor;
+        const end = Math.min(start + this.RENDER_BATCH, list.length);
+        this._appendCards(list.slice(start, end), start, container, this._renderDark);
+        this._renderCursor = end;
+        if (this._renderCursor >= list.length) this._removeSentinel();
+        else this._ensureSentinelAtEnd(container);
+    },
+
+    /** 把一批 live 建成卡片并挂载（含对比复选框绑定 + 两个视口观察器 observe）。 */
+    _appendCards(slice, indexOffset, container, isDarkMode) {
+        slice.forEach((live, i) => {
+            const card = LiveCard.create(live, isDarkMode, indexOffset + i);
 
             // 绑定对比复选框：初始化选中态 + 点击切换（监听绑在更大的命中区上，避免点偏误触大屏预览）
             const hit = card.querySelector('.compare-hit');
@@ -677,6 +709,40 @@ const ModalUI = {
 
             container.appendChild(card);
         });
+    },
+
+    /** 创建/移动哨兵到列表末尾并交给批次观察器监听。 */
+    _ensureSentinelAtEnd(container) {
+        let s = this._sentinel;
+        if (!s) {
+            s = document.createElement('div');
+            s.className = 'live-grid-sentinel';
+            s.style.cssText = 'grid-column:1/-1;height:1px;';
+            this._sentinel = s;
+        }
+        container.appendChild(s); // 重新追加 = 移到末尾
+        if (this._batchObserver) this._batchObserver.observe(s);
+    },
+
+    /** 移除末尾哨兵（全部渲染完毕）。 */
+    _removeSentinel() {
+        if (this._batchObserver && this._sentinel) this._batchObserver.unobserve(this._sentinel);
+        if (this._sentinel) { this._sentinel.remove(); this._sentinel = null; }
+    },
+
+    /** 批次观察器：哨兵进入（提前 600px）即渲染下一批。 */
+    _setupBatchObserver(scrollRoot) {
+        this._teardownBatchObserver();
+        if (typeof IntersectionObserver === 'undefined') return;
+        this._batchObserver = new IntersectionObserver((entries) => {
+            entries.forEach(entry => { if (entry.isIntersecting) this._renderNextBatch(); });
+        }, { root: scrollRoot || null, rootMargin: '600px 0px', threshold: 0 });
+    },
+
+    /** 断开批次观察器并移除哨兵（重渲染/关闭时）。 */
+    _teardownBatchObserver() {
+        if (this._batchObserver) { this._batchObserver.disconnect(); this._batchObserver = null; }
+        if (this._sentinel) { this._sentinel.remove(); this._sentinel = null; }
     },
 
     /**
@@ -811,28 +877,8 @@ const ModalUI = {
                 if (searchValue === lastSearchValue) return;
                 lastSearchValue = searchValue;
 
-                // 获取当前是否在特别关心筛选状态
-                const favoriteButton = modal.querySelector('.favorite-filter-button');
-                const isFiltering = favoriteButton && 
-                    (favoriteButton.style.background === (isDarkMode ? 'rgb(255, 44, 85)' : 'rgb(255, 232, 236)'));
-
-                // 先应用特别关心筛选
-                let filteredList = isFiltering
-                    ? liveList.filter(live => FavoriteManager.isFavorite(live.secUid))
-                    : liveList;
-
-                // 再应用搜索筛选
-                if (searchValue) {
-                    filteredList = filteredList.filter(live => 
-                        live.title.toLowerCase().includes(searchValue) || 
-                        live.anchor.toLowerCase().includes(searchValue)
-                    );
-                }
-
-                // 更新直播人数显示
-                this.updateLiveCount(modal, filteredList.length);
-                
-                this.renderLiveList(filteredList, container, isDarkMode);
+                // 统一按当前「搜索 + 特别关心 + 排序」重渲染
+                this._rerenderView();
             }, 300);
         });
     },
@@ -885,7 +931,7 @@ const ModalUI = {
                 <svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
                     <path d="M3 4h10M5 8h6M7 12h2" stroke="${isDarkMode ? '#fff' : '#000'}" stroke-width="2" stroke-linecap="round"/>
                 </svg>
-                <span style="margin-left: 4px;">人气</span>
+                <span style="margin-left: 4px;">默认</span>
             `,
             styles: {
                 display: 'flex',
@@ -902,60 +948,118 @@ const ModalUI = {
             }
         });
 
-        this.isSorted = false;
+        // 三态循环：默认（接口顺序）→ 人气（在线人数降序）→ 最常看（本周观看次数降序）
+        button.setAttribute('title', '切换排序：默认 / 人气 / 最常看');
         button.addEventListener('click', () => {
             if (!this.currentLiveList) return;
-            
-            const container = DOMUtils.findElement('.live-grid');
-            const searchInput = document.querySelector('.live-modal-content input');
-            const searchText = searchInput?.value.toLowerCase().trim() || '';
-            
-            // 获取特别关心按钮状态
-            const favoriteButton = document.querySelector('.favorite-filter-button');
-            const isFilteringFavorites = favoriteButton && 
-                (favoriteButton.style.background === (isDarkMode ? 'rgb(255, 44, 85)' : 'rgb(255, 232, 236)'));
-            
-            // 先根据搜索条件和特别关心状态筛选
-            let filteredList = this.currentLiveList;
-            
-            // 应用搜索筛选
-            if (searchText) {
-                filteredList = filteredList.filter(live => 
-                    live.anchor.toLowerCase().includes(searchText) ||
-                    live.title.toLowerCase().includes(searchText)
-                );
-            }
-            
-            // 应用特别关心筛选
-            if (isFilteringFavorites) {
-                filteredList = filteredList.filter(live => FavoriteManager.isFavorite(live.secUid));
-            }
+            const ORDER = ['default', 'popularity', 'mostWatched'];
+            const LABEL = { default: '默认', popularity: '人气', mostWatched: '最常看' };
+            this.sortMode = ORDER[(ORDER.indexOf(this.sortMode) + 1) % ORDER.length];
+            button.querySelector('span').textContent = LABEL[this.sortMode];
+            this._rerenderView();
+        });
 
-            if (!this.isSorted) {
-                // 按人气排序
-                filteredList = [...filteredList].sort((a, b) => b.viewerCount - a.viewerCount);
-                button.querySelector('span').textContent = '默认';
-            } else {
-                // 恢复默认排序，但保持筛选条件
-                filteredList = searchText ? 
-                    this.currentLiveList.filter(live => 
-                        (live.anchor.toLowerCase().includes(searchText) ||
-                        live.title.toLowerCase().includes(searchText)) &&
-                        (!isFilteringFavorites || FavoriteManager.isFavorite(live.secUid))
-                    ) : 
-                    isFilteringFavorites ?
-                        this.currentLiveList.filter(live => FavoriteManager.isFavorite(live.secUid)) :
-                        this.currentLiveList;
-                button.querySelector('span').textContent = '人气';
+        return button;
+    },
+
+    /**
+     * 创建「备份」按钮：点击弹小菜单，导出 / 导入特别关心（JSON）。
+     * 菜单挂到 body 固定定位，避免被 header 的 overflow 裁剪。
+     * @private
+     */
+    createBackupButton(isDarkMode) {
+        const button = DOMUtils.createElement('button', {
+            className: 'backup-button',
+            innerHTML: `
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="${isDarkMode ? '#fff' : '#000'}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>
+                </svg>
+                <span style="margin-left: 4px;">备份</span>
+            `,
+            styles: {
+                display: 'flex', alignItems: 'center', padding: '6px 12px',
+                border: `1px solid ${isDarkMode ? '#3f3f3f' : '#ddd'}`, borderRadius: '4px',
+                background: 'transparent', color: isDarkMode ? '#fff' : '#000',
+                cursor: 'pointer', fontSize: '14px', transition: 'background-color 0.2s', justifyContent: 'center'
             }
-            
-            this.isSorted = !this.isSorted;
-            
-            // 更新直播人数显示
-            const modal = DOMUtils.findElement('.live-modal-content');
-            this.updateLiveCount(modal, filteredList.length);
-            
-            this.renderLiveList(filteredList, container, isDarkMode);
+        });
+        button.setAttribute('title', '导入 / 导出特别关心');
+
+        // 隐藏文件选择器（导入用）
+        const fileInput = document.createElement('input');
+        fileInput.type = 'file';
+        fileInput.accept = '.json,application/json';
+        fileInput.style.display = 'none';
+        fileInput.addEventListener('change', async () => {
+            const file = fileInput.files && fileInput.files[0];
+            if (!file) return;
+            try {
+                const text = await file.text();
+                const n = FavoriteManager.importData(text, 'merge');
+                ToastManager.show(`已导入，特别关心共 ${n} 个`, TOAST.TYPE.SUCCESS);
+                this._rerenderView(); // 刷新心标
+            } catch (e) {
+                ToastManager.show('导入失败：' + e.message, TOAST.TYPE.ERROR);
+            } finally {
+                fileInput.value = '';
+            }
+        });
+        button.appendChild(fileInput);
+
+        const doExport = () => {
+            const json = FavoriteManager.exportData();
+            const blob = new Blob([json], { type: 'application/json' });
+            const url = URL.createObjectURL(blob);
+            const d = new Date();
+            const stamp = `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}${String(d.getDate()).padStart(2, '0')}`;
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `特别关心_${stamp}.json`;
+            document.body.appendChild(a);
+            a.click();
+            a.remove();
+            setTimeout(() => URL.revokeObjectURL(url), 1000);
+            ToastManager.show('已导出特别关心', TOAST.TYPE.SUCCESS);
+        };
+
+        const closeMenu = () => {
+            if (this._backupMenu) { this._backupMenu.remove(); this._backupMenu = null; }
+        };
+        const showMenu = () => {
+            closeMenu();
+            const menu = document.createElement('div');
+            Object.assign(menu.style, {
+                position: 'fixed', zIndex: '20002', minWidth: '140px',
+                background: isDarkMode ? '#252632' : '#fff',
+                border: `1px solid ${isDarkMode ? '#3f3f3f' : '#ddd'}`,
+                borderRadius: '8px', overflow: 'hidden', boxShadow: '0 4px 16px rgba(0,0,0,0.25)'
+            });
+            const r = button.getBoundingClientRect();
+            menu.style.left = `${r.left}px`;
+            menu.style.top = `${r.bottom + 6}px`;
+            const item = (label, fn) => {
+                const it = document.createElement('div');
+                it.textContent = label;
+                Object.assign(it.style, {
+                    padding: '10px 14px', fontSize: '14px', color: isDarkMode ? '#fff' : '#000',
+                    cursor: 'pointer', whiteSpace: 'nowrap'
+                });
+                it.addEventListener('mouseenter', () => { it.style.background = isDarkMode ? '#33363d' : '#f2f2f2'; });
+                it.addEventListener('mouseleave', () => { it.style.background = 'transparent'; });
+                it.addEventListener('click', (e) => { e.stopPropagation(); closeMenu(); fn(); });
+                return it;
+            };
+            menu.appendChild(item('导出特别关心', doExport));
+            menu.appendChild(item('导入特别关心', () => fileInput.click()));
+            document.body.appendChild(menu);
+            this._backupMenu = menu;
+            // 点其它地方收起
+            setTimeout(() => document.addEventListener('click', closeMenu, { once: true }), 0);
+        };
+
+        button.addEventListener('click', (e) => {
+            e.stopPropagation();
+            if (this._backupMenu) closeMenu(); else showMenu();
         });
 
         return button;
@@ -1336,8 +1440,8 @@ const ModalUI = {
         // 重置排序按钮
         const sortBtn = modal.querySelector('.sort-button');
         if (sortBtn) {
-            this.isSorted = false;
-            sortBtn.querySelector('span').textContent = '人气';
+            this.sortMode = 'default';
+            sortBtn.querySelector('span').textContent = '默认';
         }
 
         // 重置特别关心按钮

@@ -37,19 +37,22 @@ export const PreloadManager = {
     _pauseReasons: new Set(),
 
     // —— 可调参数 ——
-    // 同时加载/录制的并发**上限**（约一屏可见数；仅加载期瞬时峰值，稳态仍是本地循环视频）。
-    // 实际值在 init() 里按设备核数自适应下调（弱机防卡顿），不会超过此上限。
+    // 加载并发**硬上限**常量（约一屏可见数）。注意：实际调度用的是 MAX_CONCURRENT_RECORD（见下）。
     MAX_CONCURRENT: 9,
+    // 同时进行的**录制（编码）**并发上限——每路加载即一路 MediaRecorder 编码，编码是 CPU 主负载。
+    // 把它压到 3，首次填满视口的编码尖峰被压平；其余卡片先显封面/缓存循环，节奏更稳。
+    // init() 里按核数自适应（弱机更低），范围 [2, 3]。
+    MAX_CONCURRENT_RECORD: 3,
     // 片段缓存软上限，超出按时间淘汰（120×~0.8MB≈100MB blob，存储非解码）
     MAX_CACHE: 120,
-    // 单段录制时长（毫秒）：8s 足够形成「会动的缩略图」，比 12s 省约 1/3 开销（抖音官方约 10s）
-    RECORD_MS: 8000,
+    // 单段录制时长（毫秒）：5s 已足够「会动的缩略图」，比 8s 再省约 37% 编码时间与缓存内存
+    RECORD_MS: 5000,
     // 单路加载/录制整体超时（毫秒）
     LOAD_TIMEOUT: 20000,
     // 最大重试次数
     MAX_RETRY: 2,
-    // 录制码率（缩略图够清晰即可，省内存；悬浮已切实时流故片段清晰度不重要）
-    CLIP_BITRATE: 800000,
+    // 录制码率（缩略图够清晰即可，省内存/编码 CPU；悬浮已切实时流故片段清晰度不重要）
+    CLIP_BITRATE: 400000,
     // 片段过期阈值：超过则在重新进视口时后台重录刷新，避免画面陈旧（按分钟配置）
     CLIP_MAX_AGE: 3 * 60 * 1000, // 3 分钟
 
@@ -60,7 +63,9 @@ export const PreloadManager = {
         // E：按设备逻辑核数自适应并发上限——弱机调小防卡顿、强机满速；下限 4、不超过 MAX_CONCURRENT。
         const cores = navigator.hardwareConcurrency || 6; // 未知时按中端 6 核处理
         this.MAX_CONCURRENT = Math.max(4, Math.min(this.MAX_CONCURRENT, Math.ceil(cores * 0.75)));
-        Logger.log(`并发上限自适应为 ${this.MAX_CONCURRENT}（核数 ${cores}）`);
+        // 录制（编码）并发自适应：弱机 2、其余 3（编码尖峰削峰的关键）
+        this.MAX_CONCURRENT_RECORD = Math.max(2, Math.min(this.MAX_CONCURRENT_RECORD, Math.ceil(cores * 0.3)));
+        Logger.log(`加载上限 ${this.MAX_CONCURRENT}、录制上限 ${this.MAX_CONCURRENT_RECORD}（核数 ${cores}）`);
 
         // C：标签页切到后台只暂停「启动新的片段加载」，不暂停循环播放（回前台恢复加载）
         document.addEventListener('visibilitychange', () => {
@@ -182,7 +187,8 @@ export const PreloadManager = {
     _pump() {
         // 暂停期间不启动新加载（hover/大屏/后台）
         if (this._pauseReasons.size) return;
-        while (this.activeLoads < this.MAX_CONCURRENT && this.queue.length > 0) {
+        // 用录制并发上限调度：每路加载即一路编码，借此把同时编码数压到 MAX_CONCURRENT_RECORD
+        while (this.activeLoads < this.MAX_CONCURRENT_RECORD && this.queue.length > 0) {
             const { live, refresh } = this.queue.shift();
             // 排队期间若已被其它途径缓存，跳过（刷新任务除外，它就是要重录覆盖）
             if (!refresh && this.preloadCache.has(live.roomUrl)) {
@@ -466,7 +472,7 @@ export const PreloadManager = {
             cacheBytes,
             loading: this.activeLoads,
             queued: this.queue.length,
-            maxConcurrent: this.MAX_CONCURRENT,
+            maxConcurrent: this.MAX_CONCURRENT_RECORD,
             pauseReasons: [...this._pauseReasons],
             loopVideos
         };
