@@ -821,8 +821,9 @@ wow，好热闹;
         // B：大屏看真直播时背后整墙不可见，暂停全部片段加载 + 循环播放（先暂停，再清掉可能残留的 hover 标记，
         // 因 fullscreen 仍在集合中故不会触发加载；避免点开大屏时 mouseleave 不触发导致加载被永久挂起）
         PreloadManager.pauseLoading('fullscreen');
+        PreloadManager.pausePlayback('fullscreen');
         PreloadManager.resumeLoading('hover');
-        // 注：只暂停「启动新的片段加载」，不暂停整墙循环播放（暂停播放体验差）
+        // 注：大屏看真直播时整墙被遮不可见，暂停加载 + 暂停整墙循环播放，释放解码 CPU 给大屏
 
         // 不复用悬浮流：若有悬浮预览在播，先释放（大屏直接请求自适应清晰度，1~2s 出画面）
         if (this.videoElement || this.hls) { try { this.cleanupResources(); } catch (_) {} }
@@ -1067,8 +1068,8 @@ wow，好热闹;
             try { this.cleanupResources(); } catch (_) {} // 销毁大屏 HLS 实例及卡片预览资源
             try { videos.forEach(video => { video.pause(); video.src = ''; }); } catch (_) {}
             this.currentBigVideo = null;
-            // B：退出大屏，恢复整墙的片段加载（循环播放本就没暂停）
-            try { PreloadManager.resumeLoading('fullscreen'); } catch (_) {}
+            // B：退出大屏，恢复整墙循环播放与片段加载
+            try { PreloadManager.resumePlayback('fullscreen'); PreloadManager.resumeLoading('fullscreen'); } catch (_) {}
             modal.remove();
         };
         // 暴露给控制栏退出按钮，三条关闭路径（ESC/遮罩/退出按钮）统一走完整清理
@@ -1190,13 +1191,27 @@ wow，好热闹;
         return (name || '主播').replace(/[\\/:*?"<>|\s]+/g, '_').slice(0, 16);
     },
 
-    /** 把录制 chunks 存为 webm 下载 */
-    _downloadWebm(chunks, fileName) {
+    /** 由实际录制 mime 推导容器后缀与 Blob type（H.264→mp4/mkv，其余→webm） */
+    _recContainer(mimeType) {
+        const m = (mimeType || '').toLowerCase();
+        if (m.includes('mp4')) return { ext: 'mp4', blobType: 'video/mp4' };
+        if (m.includes('matroska') || m.includes('mkv')) return { ext: 'mkv', blobType: 'video/x-matroska' };
+        return { ext: 'webm', blobType: 'video/webm' };
+    },
+
+    /**
+     * 把录制 chunks 存为文件下载，容器/后缀随实际编码走。
+     * @param {Blob[]} chunks - 录制分片
+     * @param {string} baseName - 不带后缀的文件名
+     * @param {string} mimeType - recorder.mimeType（构造后浏览器回填的真实类型）
+     */
+    _downloadRec(chunks, baseName, mimeType) {
         if (!chunks || !chunks.length) return;
-        const blob = new Blob(chunks, { type: 'video/webm' });
+        const { ext, blobType } = this._recContainer(mimeType);
+        const blob = new Blob(chunks, { type: blobType });
         const a = document.createElement('a');
         a.href = URL.createObjectURL(blob);
-        a.download = fileName;
+        a.download = `${baseName}.${ext}`;
         a.style.display = 'none';
         document.body.appendChild(a);
         a.click();
@@ -1232,10 +1247,14 @@ wow，好热闹;
         return el;
     },
 
-    /** 选择支持的录制 mime（vp8 优先：对 canvas.captureStream 最可靠且能正常保存） */
+    /** 选择支持的录制 mime（H.264 优先：多走 GPU 硬件编码、几乎不吃 CPU；回退 VP8 软编） */
     _pickRecorderMime() {
         const cands = [
-            'video/webm;codecs=vp8,opus',
+            'video/mp4;codecs=avc1.640029',   // H.264 High + mp4（Chrome 110+，优先硬件编码）
+            'video/mp4;codecs=avc1',
+            'video/x-matroska;codecs=avc1',   // 部分版本仅 mkv 容器支持 H.264
+            'video/webm;codecs=h264',
+            'video/webm;codecs=vp8,opus',     // 回退：VP8 软编（一直可用）
             'video/webm;codecs=vp9,opus',
             'video/webm'
         ];
@@ -1266,6 +1285,12 @@ wow，好热闹;
             display: 'flex', justifyContent: 'center', alignItems: 'center'
         });
         document.body.appendChild(modal);
+
+        // 对比预览铺满整屏、整墙不可见：暂停后台拉流加载 + 暂停整墙循环播放，CPU 让给多路实时流/录制；
+        // 先暂停再清掉可能残留的 hover 标记（照搬 openFullPreview，避免 mouseleave 不触发致加载被永久挂起）
+        PreloadManager.pauseLoading('compare');
+        PreloadManager.pausePlayback('compare');
+        PreloadManager.resumeLoading('hover');
 
         // 面板默认铺满整屏（100% 宽高），不自动进入浏览器全屏；全屏由按钮手动触发
 
@@ -1305,9 +1330,9 @@ wow，好热闹;
             recordButtons.forEach(({ btn }) => setDisabled(btn, mergeActive));
         };
 
-        const makeBeforeUnload = (chunks, fileName) => {
+        const makeBeforeUnload = (chunks, baseName, mimeType) => {
             const handler = (e) => {
-                this._downloadWebm(chunks, fileName);
+                this._downloadRec(chunks, baseName, mimeType);
                 e.preventDefault();
                 e.returnValue = '正在录制，关闭页面将保存已录制内容，确定离开？';
             };
@@ -1324,7 +1349,7 @@ wow，好热闹;
             recorder.ondataavailable = (e) => { if (e.data.size > 0) chunks.push(e.data); };
             const name = this._sanitizeName(live.remark || live.anchor);
             recorder.onstop = () => {
-                this._downloadWebm(chunks, `抖音对比-单路_${name}_${this._recTimestamp()}.webm`);
+                this._downloadRec(chunks, `抖音对比-单路_${name}_${this._recTimestamp()}`, recorder.mimeType);
                 ToastManager.show('单路录制已保存', TOAST.TYPE.INFO);
             };
             recorder.start(1000);
@@ -1333,11 +1358,13 @@ wow，好热闹;
             const tEl = indicator.querySelector('.t');
             tEl.textContent = '00:00:00';
             const timer = setInterval(() => { tEl.textContent = this._fmtDur(Date.now() - startTime); }, 500);
-            const beforeUnload = makeBeforeUnload(chunks, `抖音对比-单路_${name}_未完成.webm`);
+            const beforeUnload = makeBeforeUnload(chunks, `抖音对比-单路_${name}_未完成`, recorder.mimeType);
             window.addEventListener('beforeunload', beforeUnload);
             indivRecorders.set(video, { recorder, chunks, btn, indicator, timer, beforeUnload });
             this._setRecIcon(btn, true);
             refreshRecAvailability();
+            // 录制深度限流：立即中止后台墙仍在途的加载/录制残留（加载与播放已被模态暂停）
+            try { PreloadManager.abortInFlight(); } catch (_) {}
         };
         const stopIndiv = (video) => {
             const r = indivRecorders.get(video);
@@ -1521,7 +1548,7 @@ wow，好热闹;
                 };
                 recorder.onstop = () => {
                     if (!chunks.length) { ToastManager.show('合并录制为空，未保存', TOAST.TYPE.ERROR); return; }
-                    this._downloadWebm(chunks, `抖音对比-合并_${names}_${this._recTimestamp()}.webm`);
+                    this._downloadRec(chunks, `抖音对比-合并_${names}_${this._recTimestamp()}`, recorder.mimeType);
                     ToastManager.show('合并录制已保存', TOAST.TYPE.INFO);
                 };
                 recorder.start(1000);
@@ -1531,12 +1558,14 @@ wow，好热闹;
                 const tEl = mergeIndicator.querySelector('.t');
                 tEl.textContent = '00:00:00';
                 const timer = setInterval(() => { tEl.textContent = this._fmtDur(Date.now() - startTime); }, 500);
-                const beforeUnload = makeBeforeUnload(chunks, `抖音对比-合并_${names}_未完成.webm`);
+                const beforeUnload = makeBeforeUnload(chunks, `抖音对比-合并_${names}_未完成`, recorder.mimeType);
                 window.addEventListener('beforeunload', beforeUnload);
                 merge = { recorder, chunks, raf, audioCtx, timer, beforeUnload };
                 mergeActive = true;
                 this._setRecIcon(mergeBtn, true);
                 refreshRecAvailability();
+                // 录制深度限流：立即中止后台墙仍在途的加载/录制残留
+                try { PreloadManager.abortInFlight(); } catch (_) {}
                 ToastManager.show('开始合并录制', TOAST.TYPE.INFO);
             } catch (err) {
                 Logger.error('合并录制启动失败:', err);
@@ -1632,6 +1661,8 @@ wow，好热闹;
             this.compareHlsInstances.forEach(hls => { try { hls.stopLoad(); hls.destroy(); } catch (_) {} });
             this.compareHlsInstances = [];
             modal.querySelectorAll('video').forEach(v => { v.pause(); v.srcObject = null; v.src = ''; });
+            // 恢复后台整墙：先恢复循环播放、再恢复拉流加载
+            try { PreloadManager.resumePlayback('compare'); PreloadManager.resumeLoading('compare'); } catch (_) {}
             modal.remove();
         };
         // 与大屏预览一致：浏览器全屏时 ESC 交给浏览器退全屏（面板留 100%）；非全屏才关闭对比
@@ -2525,23 +2556,10 @@ wow，好热闹;
                         }
                     };
 
-                    // 监听停止事件，将录制的数据保存为Blob对象
+                    // 监听停止事件，将录制的数据保存为文件（容器/后缀随实际编码走）
                     this.mediaRecorder.onstop = () => {
-                        const blob = new Blob(this.recordedChunks, { type: 'video/webm' });
-                        const now = new Date();
-                        const timestamp = `${now.getFullYear()}${(now.getMonth()+1).toString().padStart(2, '0')}${now.getDate().toString().padStart(2, '0')}_${now.getHours().toString().padStart(2, '0')}${now.getMinutes().toString().padStart(2, '0')}${now.getSeconds().toString().padStart(2, '0')}`;
-                        const fileName = `${this.currentLive.anchor}_${timestamp}.webm`;
-
-                        // 创建下载链接
-                        const a = document.createElement('a');
-                        a.href = URL.createObjectURL(blob);
-                        a.download = fileName;
-                        a.style.display = 'none';
-                        document.body.appendChild(a);
-                        a.click();
-                        URL.revokeObjectURL(a.href);
-                        document.body.removeChild(a);
-                        
+                        const baseName = `${this.currentLive.anchor}_${this._recTimestamp()}`;
+                        this._downloadRec(this.recordedChunks, baseName, this.mediaRecorder.mimeType);
                         ToastManager.show('视频保存成功', TOAST.TYPE.INFO);
                     };
 
@@ -2552,21 +2570,14 @@ wow，好热闹;
                     this.updateRecordIcon(recordBtn, true);
                     recordDuration.style.display = 'block';
                     this.updateRecordDuration(recordDuration);
+                    // 录制深度限流：立即中止后台墙仍在途的加载/录制残留（加载与播放已被大屏暂停）
+                    try { PreloadManager.abortInFlight(); } catch (_) {}
 
                     // 注册 beforeunload 保护：关闭/刷新页面时尝试保存已录制的内容
                     this._recordBeforeUnload = (e) => {
                         if (this.recordedChunks.length > 0) {
-                            const blob = new Blob(this.recordedChunks, { type: 'video/webm' });
-                            const now = new Date();
-                            const ts = `${now.getFullYear()}${String(now.getMonth()+1).padStart(2,'0')}${String(now.getDate()).padStart(2,'0')}_${String(now.getHours()).padStart(2,'0')}${String(now.getMinutes()).padStart(2,'0')}${String(now.getSeconds()).padStart(2,'0')}`;
                             const anchor = this.currentLive?.anchor || '直播录制';
-                            const a = document.createElement('a');
-                            a.href = URL.createObjectURL(blob);
-                            a.download = `${anchor}_${ts}_未完成.webm`;
-                            a.style.display = 'none';
-                            document.body.appendChild(a);
-                            a.click();
-                            document.body.removeChild(a);
+                            this._downloadRec(this.recordedChunks, `${anchor}_${this._recTimestamp()}_未完成`, this.mediaRecorder?.mimeType);
                         }
                         // 弹出确认对话框提醒用户
                         e.preventDefault();
@@ -2590,7 +2601,7 @@ wow，好热闹;
                     window.removeEventListener('beforeunload', this._recordBeforeUnload);
                     this._recordBeforeUnload = null;
                 }
-                ToastManager.show('录制已停止', TOAST.TYPE.INFO);
+                // 停止提示交给 onstop 的「视频保存成功」，此处不再重复弹「录制已停止」
             }
         };
         
@@ -2647,6 +2658,9 @@ wow，好热闹;
             lineHeight: '1'
         });
 
+        // 红色闪烁圆点 + 时间文本（与对比录制指示器同款）；更新时只改 .t，圆点持续闪烁
+        recordDuration.innerHTML = `<span style="width:8px;height:8px;border-radius:50%;background:#ff2c55;display:inline-block;vertical-align:middle;margin-right:6px;animation:loading-fade-in 1s ease-in-out infinite alternate;"></span><span class="t" style="vertical-align:middle;">录制中 00:00:00</span>`;
+
         // 添加鼠标悬浮效果
         recordDuration.addEventListener('mouseenter', () => {
             recordDuration.style.background = 'rgba(0, 0, 0, 0.6)';
@@ -2668,8 +2682,9 @@ wow，好热闹;
         const duration = Math.floor((Date.now() - this.recordStartTime) / 1000);
         // 格式化为 HH:MM:SS（超过1小时也能正确显示）
         const time = new Date(duration * 1000).toISOString().slice(11, 19);
-        // 更新录制状态显示
-        recordDuration.textContent = `● 录制中 ${time}`;
+        // 只更新时间文本，保留前面的红色闪烁圆点
+        const tEl = recordDuration.querySelector('.t');
+        if (tEl) tEl.textContent = `录制中 ${time}`;
         // 修复：使用箭头函数保留 this 上下文，并将 recordDuration 传入递归调用
         requestAnimationFrame(() => this.updateRecordDuration(recordDuration));
     },

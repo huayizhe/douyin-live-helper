@@ -39,6 +39,10 @@ export const PreloadManager = {
     _recordWaiters: [],
     // 暂停加载的原因集合（hover/fullscreen/hidden 任一存在即暂停启动新加载）
     _pauseReasons: new Set(),
+    // 暂停整墙循环播放的原因集合（compare/fullscreen 等；非空即整墙停播，释放解码）
+    _playbackPauseReasons: new Set(),
+    // 整墙循环播放是否处于暂停态（守卫在途加载完成后的自动起播）
+    _playbackPaused: false,
 
     // —— 可调参数 ——
     // 加载并发上限：多路同时拉流/起播，快速铺画面（加载/解码相对廉价）。init() 按核数自适应。
@@ -93,6 +97,39 @@ export const PreloadManager = {
     resumeLoading(reason) {
         this._pauseReasons.delete(reason);
         if (this._pauseReasons.size === 0) this._pump();
+    },
+
+    /**
+     * 暂停整墙的循环播放（多路对比/大屏预览打开时调用）。整墙被模态遮住时不可见，
+     * 停播纯赚——释放整墙解码 CPU，让给前台实时流/录制。复用单卡 pauseCard。
+     * @param {string} reason - 暂停原因（compare/fullscreen）
+     */
+    pausePlayback(reason) {
+        this._playbackPauseReasons.add(reason);
+        this._playbackPaused = true;
+        for (const card of this.visible.values()) this.pauseCard(card);
+    },
+
+    /**
+     * 解除某原因的播放暂停；无其它原因时恢复整墙循环播放。
+     * @param {string} reason
+     */
+    resumePlayback(reason) {
+        this._playbackPauseReasons.delete(reason);
+        if (this._playbackPauseReasons.size === 0) {
+            this._playbackPaused = false;
+            for (const card of this.visible.values()) this.resumeCard(card);
+        }
+    },
+
+    /**
+     * 立即中止所有在途加载/录制（录制深度限流时调用）。pauseLoading 只拦新加载、
+     * 不动在途；此法把后台仍在拉流/编码的残留也清掉，把 CPU 全让给前台录制。
+     */
+    abortInFlight() {
+        for (const card of this.visible.values()) {
+            if (card && card._clipAbort) { try { card._clipAbort(); } catch (_) {} }
+        }
     },
 
     /**
@@ -329,8 +366,9 @@ export const PreloadManager = {
             video.src = blobUrl;
             cardPreview._clipLoading = false;
             cardPreview._clipAbort = null;
-            // 视口播放门控：录制完成时卡片若不完全可见则保持暂停（默认 true 兼容观察器未启用场景）
-            if (cardPreview._shouldPlay !== false) {
+            // 视口播放门控：录制完成时卡片若不完全可见则保持暂停（默认 true 兼容观察器未启用场景）；
+            // 整墙停播期间（大屏/对比打开）也不自动起播
+            if (cardPreview._shouldPlay !== false && !this._playbackPaused) {
                 video.play().catch(() => {});
             }
             this._finishLoad(roomUrl, true, null, blobUrl, live, aspect, size);
@@ -503,8 +541,8 @@ export const PreloadManager = {
         cardPreview._clipVideo = video;
         // 横竖屏渲染：竖屏铺满；横屏完整居中 + 上下模糊填充
         StyleUtils.applyMediaOrientation(cardPreview, video, StyleUtils.isLandscapeRatio(cached.aspect));
-        // 视口播放门控：仅完全可见时才开播
-        if (cardPreview._shouldPlay !== false) {
+        // 视口播放门控：仅完全可见时才开播；整墙停播期间（大屏/对比打开）也不自动起播
+        if (cardPreview._shouldPlay !== false && !this._playbackPaused) {
             video.play().catch(() => {});
         }
     },
