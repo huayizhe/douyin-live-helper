@@ -31,28 +31,32 @@ export const PreloadManager = {
     visible: new Map(),
     // 待加载队列（{ live }）
     queue: [],
-    // 正在加载/录制的路数
+    // 正在加载（含拉流/起播/等录位/录制）的路数
     activeLoads: 0,
+    // 正在录制（编码）的路数
+    activeRecords: 0,
+    // 等待录制槽的回调队列（已起播、等编码空位）
+    _recordWaiters: [],
     // 暂停加载的原因集合（hover/fullscreen/hidden 任一存在即暂停启动新加载）
     _pauseReasons: new Set(),
 
     // —— 可调参数 ——
-    // 加载并发**硬上限**常量（约一屏可见数）。注意：实际调度用的是 MAX_CONCURRENT_RECORD（见下）。
+    // 加载并发上限：多路同时拉流/起播，快速铺画面（加载/解码相对廉价）。init() 按核数自适应。
     MAX_CONCURRENT: 9,
-    // 同时进行的**录制（编码）**并发上限——每路加载即一路 MediaRecorder 编码，编码是 CPU 主负载。
-    // 把它压到 3，首次填满视口的编码尖峰被压平；其余卡片先显封面/缓存循环，节奏更稳。
+    // **录制（编码）并发上限**——每路录制一个 MediaRecorder 编码，是 CPU 主负载。与加载分离：
+    // 加载可 >3 快速出画面，但同时编码 ≤ 此值削峰；满则该路 live 流继续播、排队等录位。
     // init() 里按核数自适应（弱机更低），范围 [2, 3]。
     MAX_CONCURRENT_RECORD: 3,
     // 片段缓存软上限，超出按时间淘汰（120×~0.8MB≈100MB blob，存储非解码）
     MAX_CACHE: 120,
-    // 单段录制时长（毫秒）：5s 已足够「会动的缩略图」，比 8s 再省约 37% 编码时间与缓存内存
-    RECORD_MS: 5000,
+    // 单段录制时长（毫秒）：8s 足够形成「会动的缩略图」
+    RECORD_MS: 8000,
     // 单路加载/录制整体超时（毫秒）
     LOAD_TIMEOUT: 20000,
     // 最大重试次数
     MAX_RETRY: 2,
-    // 录制码率（缩略图够清晰即可，省内存/编码 CPU；悬浮已切实时流故片段清晰度不重要）
-    CLIP_BITRATE: 400000,
+    // 录制码率：保证循环缩略图清晰度（恢复原值）
+    CLIP_BITRATE: 800000,
     // 片段过期阈值：超过则在重新进视口时后台重录刷新，避免画面陈旧（按分钟配置）
     CLIP_MAX_AGE: 3 * 60 * 1000, // 3 分钟
 
@@ -187,8 +191,8 @@ export const PreloadManager = {
     _pump() {
         // 暂停期间不启动新加载（hover/大屏/后台）
         if (this._pauseReasons.size) return;
-        // 用录制并发上限调度：每路加载即一路编码，借此把同时编码数压到 MAX_CONCURRENT_RECORD
-        while (this.activeLoads < this.MAX_CONCURRENT_RECORD && this.queue.length > 0) {
+        // 加载并发用 MAX_CONCURRENT（多路同时起播、快速铺画面）；编码另由录制信号量限制
+        while (this.activeLoads < this.MAX_CONCURRENT && this.queue.length > 0) {
             const { live, refresh } = this.queue.shift();
             // 排队期间若已被其它途径缓存，跳过（刷新任务除外，它就是要重录覆盖）
             if (!refresh && this.preloadCache.has(live.roomUrl)) {
@@ -201,7 +205,43 @@ export const PreloadManager = {
     },
 
     /**
-     * 启动单路：在**可见卡片**里直接播低清实时（第 0 秒就动），同时录制；
+     * 申请一个录制（编码）槽：有空位立即占用并执行 fn 起录；否则把 fn 排进等待队列，
+     * 等其它录制结束释放槽时再起录。期间该路 live 流仍在播（已可见、会动）。
+     * @private
+     */
+    _acquireRecordSlot(fn) {
+        if (this.activeRecords < this.MAX_CONCURRENT_RECORD) {
+            this.activeRecords++;
+            fn();
+        } else {
+            this._recordWaiters.push(fn);
+        }
+    },
+
+    /**
+     * 释放一个录制槽，并唤起下一个等待者（保持同时编码 ≤ MAX_CONCURRENT_RECORD）。
+     * @private
+     */
+    _releaseRecordSlot() {
+        this.activeRecords = Math.max(0, this.activeRecords - 1);
+        if (this._recordWaiters.length && this.activeRecords < this.MAX_CONCURRENT_RECORD) {
+            const next = this._recordWaiters.shift();
+            this.activeRecords++;
+            next();
+        }
+    },
+
+    /**
+     * 移除尚未起录的等待者（卡片离屏时调用，避免在死卡片上起录）。
+     * @private
+     */
+    _cancelRecordWaiter(fn) {
+        const i = this._recordWaiters.indexOf(fn);
+        if (i >= 0) this._recordWaiters.splice(i, 1);
+    },
+
+    /**
+     * 启动单路：在**可见卡片**里直接播低清实时（第 0 秒就动），起播后申请录制槽再录；
      * 录满 RECORD_MS 后把同一个 video 无缝切到本地循环 blob 并断开直播。消除「录满才显示」的空窗。
      * @private
      */
@@ -246,17 +286,27 @@ export const PreloadManager = {
         let hls = null;
         let recorder = null;
         let done = false;
+        let recordStarted = false; // 是否已占用录制槽（决定离场/收尾时如何释放）
         let aspect = null; // 宽高比 = videoWidth/videoHeight，用于横竖屏渲染
         const chunks = [];
 
         // 整体超时保护
         const timeout = setTimeout(() => { if (!done) cleanup('加载超时'); }, this.LOAD_TIMEOUT);
 
-        // 失败/中止：销毁实例、移除可见视频
+        // 占用录制槽后真正起录的回调（满则被排队，等释放时再调）
+        const recordFn = () => {
+            if (done) { this._releaseRecordSlot(); return; }
+            recordStarted = true;
+            startRecording();
+        };
+
+        // 失败/中止：销毁实例、移除可见视频；释放/取消录制槽
         const cleanup = (reason) => {
             if (done) return;
             done = true;
             clearTimeout(timeout);
+            if (recordStarted) this._releaseRecordSlot();
+            else this._cancelRecordWaiter(recordFn); // 还在等录位就直接撤销
             try { if (recorder) { recorder.onstop = null; if (recorder.state !== 'inactive') recorder.stop(); } } catch (_) {}
             try { if (hls) { hls.stopLoad(); hls.destroy(); } } catch (_) {}
             if (cardPreview._clipVideo === video) {
@@ -273,6 +323,7 @@ export const PreloadManager = {
             if (done) return;
             done = true;
             clearTimeout(timeout);
+            if (recordStarted) this._releaseRecordSlot();
             try { if (hls) { hls.stopLoad(); hls.destroy(); hls = null; } } catch (_) {}
             video.loop = true;
             video.src = blobUrl;
@@ -318,8 +369,8 @@ export const PreloadManager = {
             setTimeout(() => { try { if (recorder.state !== 'inactive') recorder.stop(); } catch (_) {} }, this.RECORD_MS);
         };
 
-        // 首帧开始播放即开录（此时已有真实画面）
-        video.addEventListener('playing', () => { if (!done && !recorder) startRecording(); }, { once: true });
+        // 首帧开始播放即申请录制槽（此时已有真实画面）；满则该路 live 流继续播、排队等录位
+        video.addEventListener('playing', () => { if (!done && !recorder && !recordStarted) this._acquireRecordSlot(recordFn); }, { once: true });
 
         if (HLS && HLS.isSupported()) {
             hls = new HLS(HLSUtils.createPreloadConfig());
@@ -472,7 +523,9 @@ export const PreloadManager = {
             cacheBytes,
             loading: this.activeLoads,
             queued: this.queue.length,
-            maxConcurrent: this.MAX_CONCURRENT_RECORD,
+            maxConcurrent: this.MAX_CONCURRENT,
+            recording: this.activeRecords,
+            maxRecord: this.MAX_CONCURRENT_RECORD,
             pauseReasons: [...this._pauseReasons],
             loopVideos
         };

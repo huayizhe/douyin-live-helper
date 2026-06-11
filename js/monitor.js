@@ -95,6 +95,8 @@ export const ResourceMonitor = {
             loading: pm.loading,
             queued: pm.queued,
             maxConcurrent: pm.maxConcurrent,
+            recording: pm.recording,
+            maxRecord: pm.maxRecord,
             pauseReasons: pm.pauseReasons,
             cached: pm.cached,
             maxCache: pm.maxCache,
@@ -164,6 +166,7 @@ export const ResourceMonitor = {
             row('— 加载 / 悬浮 / 大屏 / 对比', `${s.hls.loading} / ${s.hls.hover} / ${s.hls.full} / ${s.hls.compare}`) +
             row('&lt;video&gt; 元素（含抖音 / 我方循环）', `${s.videoTotal} / ${s.loopVideos}`) +
             row('片段加载 进行 / 排队 / 上限', `${s.loading} / ${s.queued} / ${s.maxConcurrent}`) +
+            row('录制（编码） 进行 / 上限', `${s.recording || 0} / ${s.maxRecord || 0}`, this.color(s.recording || 0, s.maxRecord || 3, (s.maxRecord || 3) + 1)) +
             row('暂停状态', s.pauseReasons.length ? s.pauseReasons.join('、') : '无') +
             row('媒体缓冲 / 解码路数（估算）', `${s.media.bufferedSec.toFixed(0)}s / ${s.media.decoding}`) +
             note('媒体缓冲为 MSE 代理（精确解码 / GPU 内存无 JS API）');

@@ -161,6 +161,9 @@ export const LOG = {
  * 许可证 / PRO 相关常量
  */
 export const LICENSE = {
+    // 会员体系总开关：false = 全功能解锁 + 隐藏顶栏会员按钮（代码全部保留，置回 true 即恢复收费门）
+    ENABLED: false,
+
     // 客服微信号（半自动收款：用户付款后联系你领取密钥）
     CONTACT_WECHAT: 'cxjingxuan',
 

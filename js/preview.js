@@ -1763,8 +1763,8 @@ wow，好热闹;
         const volumeBtn = this.createVolumeBtn(video);
         // 添加浏览器全屏按钮（在音量按钮右侧）
         const fullscreenBtn = this.createBrowserFullscreenBtn(previewContainer);
-        // 添加画中画按钮
-        const pipBtn = this.createPipBtn();
+        // 画中画暂下线（保留 createPipBtn 方法备用，置回下面两处即可恢复）
+        // const pipBtn = this.createPipBtn();
         // 添加三联屏开关按钮
         const tripleScreenBtn = this.createTripleScreenBtn(previewContainer);
         // 添加氛围词条配置按钮
@@ -1780,7 +1780,7 @@ wow，好热闹;
         if (live) controlContainer.appendChild(this.createQualityBtn(previewContainer, live));
         controlContainer.appendChild(volumeBtn);
         controlContainer.appendChild(fullscreenBtn);
-        controlContainer.appendChild(pipBtn);
+        // controlContainer.appendChild(pipBtn); // 画中画暂下线
         controlContainer.appendChild(tripleScreenBtn);
         controlContainer.appendChild(etmosphereEntryConfigBtn);
         controlContainer.appendChild(etmosphereEntryToggleBtn);

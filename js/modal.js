@@ -13,6 +13,7 @@ import { SettingsManager } from './settings.js';
 import { ToastManager } from './toast.js';
 import { LicenseManager } from './license.js';
 import { StatsManager } from './stats.js';
+import { LICENSE } from './constants.js';
 
 const ModalUI = {
     /**
@@ -224,7 +225,8 @@ const ModalUI = {
         const scrollTopButton = this.createScrollTopButton(isDarkMode);    // 回到顶部按钮
         const backupButton = this.createBackupButton(isDarkMode);        // 备份（导入/导出特别关心）
         const resourceButton = this.createResourceButton(isDarkMode);     // 资源按钮
-        const licenseBtn = LicenseManager.createLicenseBtn(isDarkMode);  // PRO 授权按钮
+        // PRO 授权按钮：会员体系关闭时不创建（LICENSE.ENABLED=false）
+        const licenseBtn = LICENSE.ENABLED ? LicenseManager.createLicenseBtn(isDarkMode) : null;
         const liveCount = this.createLiveCountElement(isDarkMode);   // 直播数量显示
         const closeButton = this.createCloseButton(isDarkMode);      // 关闭按钮
 
@@ -244,7 +246,7 @@ const ModalUI = {
          compareButton, clearCompareButton, scrollTopButton, backupButton, resourceButton, licenseBtn, liveCount]
             .forEach(btn => { if (btn) Object.assign(btn.style, MENU_BTN); });
         // PRO 按钮：与其它按钮等大（badge 由 CSS 填满整框），去掉左右 padding 让金色 badge 占满 104px
-        Object.assign(licenseBtn.style, { display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '0' });
+        if (licenseBtn) Object.assign(licenseBtn.style, { display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '0' });
 
         // 强迫症：不足 4 个字的标签撑成 4 字宽（两端对齐＝中间空格填充观感），>=4 字不动。
         // 声音按钮会重建 innerHTML，其 updateIcon 内已自带 _justifyShortLabel，这里不重复处理。
@@ -275,7 +277,7 @@ const ModalUI = {
         leftGroup.appendChild(scrollTopButton);// 8. 回到顶部按钮
         leftGroup.appendChild(backupButton);   // 9. 备份（导入/导出特别关心）
         leftGroup.appendChild(resourceButton); // 10. 资源按钮
-        leftGroup.appendChild(licenseBtn);     // 11. PRO 授权按钮
+        if (licenseBtn) leftGroup.appendChild(licenseBtn); // 11. PRO 授权按钮（会员开关关则无）
         leftGroup.appendChild(liveCount);      // 12. 直播数量显示
 
         // 组装页眉
@@ -996,10 +998,10 @@ const ModalUI = {
             try {
                 const text = await file.text();
                 const n = FavoriteManager.importData(text, 'merge');
-                ToastManager.show(`已导入，特别关心共 ${n} 个`, TOAST.TYPE.SUCCESS);
+                ToastManager.show(`已导入，特别关心共 ${n} 个`, 'success');
                 this._rerenderView(); // 刷新心标
             } catch (e) {
-                ToastManager.show('导入失败：' + e.message, TOAST.TYPE.ERROR);
+                ToastManager.show('导入失败：' + e.message, 'error');
             } finally {
                 fileInput.value = '';
             }
@@ -1019,7 +1021,7 @@ const ModalUI = {
             a.click();
             a.remove();
             setTimeout(() => URL.revokeObjectURL(url), 1000);
-            ToastManager.show('已导出特别关心', TOAST.TYPE.SUCCESS);
+            ToastManager.show('已导出特别关心', 'success');
         };
 
         const closeMenu = () => {

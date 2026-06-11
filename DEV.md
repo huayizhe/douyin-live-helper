@@ -347,10 +347,14 @@ douyinfollowplugin/
       使排队列表持续 = 当前视口（天然优先视口，不止重渲染那一刻）。
     - **未改**：`MAX_CONCURRENT` 并发上限；缓存保留（离屏只释放解码、留 blob，靠 LRU `MAX_CACHE=120` 优先淘汰离屏）。
 
-15. 录制并发与参数（`preload.js`，自 1.4.0 起）：调度真正用的是 `MAX_CONCURRENT_RECORD`（默认 3、弱机 2，
-    `_pump` 以它为上限）；每路加载=一路 `MediaRecorder` 编码，故它即「同时编码上限」，是削峰关键。`MAX_CONCURRENT`
-    仅作硬上限常量。`CLIP_BITRATE=400000`、`RECORD_MS=5000`、预加载 HLS 配置 `lowLatencyMode:false`。
-    监控面板「上限」展示读 `MAX_CONCURRENT_RECORD`。
+15. 加载与录制并发分离（`preload.js`，自 1.4.1 起）：**加载**并发用 `MAX_CONCURRENT`（自适应 cores*0.75、≤9，
+    `_pump` 以它为上限）——多路同时拉流/起播、快速铺画面。**录制（编码）**另由信号量限制到 `MAX_CONCURRENT_RECORD`
+    （自适应 2–3）：`_startLoad` 在 `playing` 时 `_acquireRecordSlot(recordFn)`，满则把 `recordFn` 排进 `_recordWaiters`、
+    该路 live 流继续播等位；`finalizeLoop`/`cleanup` 据 `recordStarted` 调 `_releaseRecordSlot()`（唤起下一个等待者）
+    或 `_cancelRecordWaiter()`（离屏撤销未起录者）。`activeRecords` 计当前编码数。
+    画质参数恢复：`CLIP_BITRATE=800000`、`RECORD_MS=8000`、预加载 HLS 配置不再覆盖 `lowLatencyMode`。
+    监控面板：「片段加载 进行/排队/上限」读 `MAX_CONCURRENT`，新增「录制（编码）进行/上限」读 `activeRecords`/`MAX_CONCURRENT_RECORD`。
+    背景：1.4.0 曾用 `MAX_CONCURRENT_RECORD` 当加载上限把加载也压到 3，导致铺画面变慢，故 1.4.1 分离。
 
 16. 分批滚动加载（`modal.js`，自 1.4.0 起）：`renderLiveList` 首批 `RENDER_BATCH=60`，末尾 `.live-grid-sentinel`
     哨兵 + `_batchObserver`（rootMargin 600px）滚到底追加下一批；`_appendCards` 复用建卡逻辑并对每张
@@ -359,9 +363,9 @@ douyinfollowplugin/
 17. 悬浮防误触（`preview.js` `setupPreview`，自 1.4.0 起）：`pauseCard` + `pauseLoading('hover')` 已并入
     既有 200ms 去抖回调（原先在 mouseenter 立即执行）。快速掠过不再停循环、不卡预加载。
 
-18. 大屏画中画（`preview.js` `createPipBtn`，自 1.4.0 起）：作用于 `this.currentBigVideo`（切清晰度后动态取），
-    点击时把该视频 `disablePictureInPicture=false` 再 `requestPictureInPicture()`；`document.pictureInPictureEnabled`
-    为假则按钮隐藏。仅大屏单路控制栏添加。
+18. 大屏画中画（`preview.js` `createPipBtn`）：**自 1.4.1 起已下线**——大屏控制栏不再创建/append PiP 按钮
+    （`createControlBar` 内两处已注释）。`createPipBtn` 方法**保留**（作用于 `this.currentBigVideo`，切清晰度后动态取；
+    点击时 `disablePictureInPicture=false` 再 `requestPictureInPicture()`）。恢复：取消那两处注释即可。
 
 19. 本地观看统计（`stats.js`，自 1.4.0 起）：`startSession/endSession`（停留 ≥`MIN_COUNT_SEC`=3s 才计一次、累加时长，
     按 ISO 周键 `_weekKey()` 自动清零）；埋点在 `preview.js` 的 `startStreamPreview`/`openFullPreview`（start）与
@@ -370,7 +374,16 @@ douyinfollowplugin/
 
 20. 特别关心导入/导出（`favorite.js` `exportData`/`importData` + `modal.js` `createBackupButton`，自 1.4.0 起）：
     「备份」按钮弹 body 级固定定位菜单（避开 header `overflow:hidden` 裁剪）；导出 Blob 下载、导入合并去重后
-    `_rerenderView()` 刷新心标。
+    `_rerenderView()` 刷新心标。注意 toast 第二参用字符串字面量 `'success'`/`'error'`（modal.js 未导入 `TOAST` 常量，
+    1.4.1 修复了误用 `TOAST.TYPE.*` 导致导入抛错的问题）。特别关心「筛选视图」只展示**当前在播**的关注主播，
+    离线关注不在列表内属正常（导入数量以提示「共 N 个」为准）。
+
+21. 会员体系总开关 `LICENSE.ENABLED`（`constants.js`，自 1.4.1 起 = `false`）：
+    - 关闭时 `license.js` 的 `get isPro()` 一律返回 `true` → 4 个功能门（`modal.js` N同时看、`preview.js` 录制/氛围词条）
+      全部自动放行，无需逐个改；`modal.js` 顶栏不创建/不 append `licenseBtn`（`LICENSE.ENABLED ? createLicenseBtn() : null`，
+      并对 `licenseBtn.style` 赋值与 append 加 `if (licenseBtn)` 守卫）。
+    - 许可证全部代码（`license.js` 验签/激活/换绑/弹窗、`tools/` 签发、`server/` 在线支付、`constants.js` 价格）**原样保留**。
+    - 恢复收费体系：把 `LICENSE.ENABLED` 置回 `true` 即可，无需改其它代码。
 
 ## Chrome 系列浏览器测试
 

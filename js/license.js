@@ -68,8 +68,8 @@ export const LicenseManager = {
     _isPro: false,
     _payload: null,
 
-    /** 是否为 PRO（多处取值点，分散增加反逆向成本）*/
-    get isPro() { return this._isPro === true; },
+    /** 是否为 PRO（多处取值点，分散增加反逆向成本）。会员体系关闭时一律视为已解锁。*/
+    get isPro() { return LICENSE.ENABLED ? (this._isPro === true) : true; },
 
     get expiresAt() { return this._payload ? this._payload.e : null; },
     get plan() { return this._payload ? this._payload.p : null; },
