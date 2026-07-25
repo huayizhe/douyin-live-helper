@@ -5,6 +5,24 @@
 
 ---
 
+## [1.4.5] - 2026-07-25
+
+### 修复
+- **横屏循环被毛玻璃挡住**（`utils.js` / `preload.js`）：`.dy-media-blur` 固定 `z-index:0`，循环/直播 video 固定 `z-index:1`；`_removeLoopVideo` / `release` 顺带清残留 blur 与 `_clipHls`，避免滚回重挂时同层后绘的 blur 盖住画面。
+
+### 体验
+- **稳播门控 + 录中丢弃重录**（`preload.js` / `clip-stutter.js`）：`playing` 后约 1s 确认 `currentTime` 持续推进再申请录制槽；录中连续停滞 >300ms 或停滞占比 >15% 则丢弃 blob、保持 live、稍后重录。
+
+### 设置
+- **去掉自动/手动**：删除 `perfMode`；滑块值即生效并发。一键还原时加载/录制并发按本机核数推荐，其余回产品默认；旁注显示推荐值。
+- **清晰度四档**（`clipQuality` 0–3）：标清/高清/超清/蓝光，同时控制列表拉流（SD1→FULL_HD1）与录制码率（400k→2M）；旧 `clipBitrate` 自动迁移。每项补充作用说明；三 Tab 面板等高（`min-height`）。
+
+### 测试 / 文档
+- 单测覆盖无 `perfMode`、还原按核数、清晰度档映射、稳播/卡顿纯函数。
+- 版本升至 1.4.5；同步 README / DEV。
+
+---
+
 ## [1.4.4] - 2026-07-25
 
 ### 功能

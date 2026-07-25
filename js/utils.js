@@ -122,6 +122,8 @@ const StyleUtils = {
      */
     applyMediaOrientation(containerEl, videoEl, isLandscape) {
         videoEl.style.objectFit = isLandscape ? 'contain' : 'cover';
+        // 视频必须高于模糊层：二者同为 0 时，滚回重挂会把 video 插到 blur 前，后绘的 blur 盖住画面
+        videoEl.style.zIndex = '1';
 
         let blur = containerEl.querySelector(':scope > .dy-media-blur');
         if (isLandscape) {
@@ -133,7 +135,8 @@ const StyleUtils = {
                     zIndex: '0', backgroundSize: 'cover', backgroundPosition: 'center',
                     filter: 'blur(24px)', transform: 'scale(1.15)', pointerEvents: 'none'
                 });
-                containerEl.insertBefore(blur, containerEl.firstChild);
+                // 保证顺序：blur → video（同层时先插的在下）
+                containerEl.insertBefore(blur, videoEl || containerEl.firstChild);
             }
             blur.style.backgroundImage = containerEl.style.backgroundImage;
         } else if (blur) {
@@ -207,19 +210,30 @@ const NetworkUtils = {
      * @returns {string} 对应清晰度的流地址，如果没有对应清晰度则返回可用的最高清晰度
      */
     getStreamUrlByQuality(streamUrlMap, quality) {
+        if (!streamUrlMap || typeof streamUrlMap !== 'object') return null;
+
         // 尝试获取指定清晰度的流地址
         if (streamUrlMap[quality]) {
             return streamUrlMap[quality];
         }
 
-        // 如果指定清晰度不可用，寻找可用的最高清晰度
-        for (const q of LIVE_QUALITY.ORDER) {
-            if (streamUrlMap[q]) {
-                return streamUrlMap[q];
+        // 档不可用：先向下（更低清晰度）再向上回退，避免直接跳到蓝光吃带宽
+        const order = LIVE_QUALITY.ORDER; // 高 → 低
+        const idx = order.indexOf(quality);
+        if (idx >= 0) {
+            for (let i = idx + 1; i < order.length; i++) {
+                if (streamUrlMap[order[i]]) return streamUrlMap[order[i]];
+            }
+            for (let i = idx - 1; i >= 0; i--) {
+                if (streamUrlMap[order[i]]) return streamUrlMap[order[i]];
             }
         }
 
-        // 如果都不可用，返回null
+        // 未知档位：任意可用最高档
+        for (const q of order) {
+            if (streamUrlMap[q]) return streamUrlMap[q];
+        }
+
         return null;
     },
 

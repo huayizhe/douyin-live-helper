@@ -16,7 +16,7 @@ import { PreloadManager } from './preload.js';
 import { PreviewManager } from './preview.js';
 import { ToastManager } from './toast.js';
 import { TOAST } from './constants.js';
-import { SettingsManager, PERF_LIMITS } from './settings.js';
+import { SettingsManager, PERF_LIMITS, CLIP_QUALITY_TIERS } from './settings.js';
 import { FavoriteManager } from './favorite.js';
 import { computeLoadConcurrency, computeRecordConcurrency } from './preload-concurrency.js';
 
@@ -334,7 +334,7 @@ export const ResourceMonitor = {
     // ──────────────────── 插件设置表单 ────────────────────
 
     /**
-     * 根据当前 Settings 填充设置表单，并按 auto/manual 禁用滑块。
+     * 根据当前 Settings 填充设置表单；旁注展示本机核数推荐并发。
      * @private
      */
     _renderSettingsForm() {
@@ -342,14 +342,8 @@ export const ResourceMonitor = {
         if (!root) return;
         const cfg = SettingsManager.getPerfConfig();
         const cores = navigator.hardwareConcurrency || 6;
-        const isAuto = cfg.perfMode !== 'manual';
 
-        // 单选
-        root.querySelectorAll('input[name="perfMode"]').forEach(r => {
-            r.checked = r.value === cfg.perfMode;
-        });
-
-        // 滑块 / 下拉数值
+        // 滑块数值
         const setVal = (name, v) => {
             const el = root.querySelector(`[data-perf="${name}"]`);
             if (!el) return;
@@ -360,35 +354,21 @@ export const ResourceMonitor = {
         setVal('maxConcurrent', cfg.maxConcurrent);
         setVal('maxConcurrentRecord', cfg.maxConcurrentRecord);
         setVal('recordMs', cfg.recordMs);
-        setVal('clipBitrate', cfg.clipBitrate);
+        setVal('clipQuality', cfg.clipQuality);
         setVal('clipSettleMs', cfg.clipSettleMs);
         setVal('maxCache', cfg.maxCache);
         setVal('clipMaxAgeMin', cfg.clipMaxAgeMin);
 
-        // 自动模式：禁用加载/录制滑块，旁注展示当前生效值
-        const loadSlider = root.querySelector('[data-perf="maxConcurrent"]');
-        const recSlider = root.querySelector('[data-perf="maxConcurrentRecord"]');
-        if (loadSlider) loadSlider.disabled = isAuto;
-        if (recSlider) recSlider.disabled = isAuto;
-
-        const effLoad = isAuto
-            ? computeLoadConcurrency(cores, cfg.maxConcurrent)
-            : cfg.maxConcurrent;
-        const effRec = isAuto
-            ? computeRecordConcurrency(cores, cfg.maxConcurrentRecord)
-            : cfg.maxConcurrentRecord;
-
+        // 只读旁注：本机核数与推荐并发（不强制）
+        const recLoad = computeLoadConcurrency(cores);
+        const recRec = computeRecordConcurrency(cores);
         const noteLoad = root.querySelector('[data-eff="maxConcurrent"]');
         const noteRec = root.querySelector('[data-eff="maxConcurrentRecord"]');
         if (noteLoad) {
-            noteLoad.textContent = isAuto
-                ? `当前生效：${effLoad}（核数 ${cores}，滑块作上限）`
-                : `当前生效：${effLoad}`;
+            noteLoad.textContent = `本机核数 ${cores}，推荐加载 ${recLoad}（当前 ${cfg.maxConcurrent}）`;
         }
         if (noteRec) {
-            noteRec.textContent = isAuto
-                ? `当前生效：${effRec}（核数 ${cores}，滑块作上限）`
-                : `当前生效：${effRec}`;
+            noteRec.textContent = `本机核数 ${cores}，推荐录制 ${recRec}（当前 ${cfg.maxConcurrentRecord}）`;
         }
     },
 
@@ -400,9 +380,10 @@ export const ResourceMonitor = {
         const n = Number(v);
         switch (name) {
             case 'recordMs': return `${(n / 1000).toFixed(0)} 秒`;
-            case 'clipBitrate':
-                if (n >= 1000000) return `${(n / 1000000).toFixed(1)}M`;
-                return `${Math.round(n / 1000)}k`;
+            case 'clipQuality': {
+                const tier = CLIP_QUALITY_TIERS[Math.max(0, Math.min(CLIP_QUALITY_TIERS.length - 1, Math.round(n)))];
+                return tier ? tier.label : String(n);
+            }
             case 'clipSettleMs': return `${n} ms`;
             case 'clipMaxAgeMin': return `${n} 分钟`;
             default: return String(n);
@@ -418,13 +399,11 @@ export const ResourceMonitor = {
         let patch = partial;
         if (!patch) {
             const root = this.panel.querySelector('.mon-pane-settings');
-            const modeEl = root.querySelector('input[name="perfMode"]:checked');
             patch = {
-                perfMode: modeEl ? modeEl.value : 'auto',
                 maxConcurrent: Number(root.querySelector('[data-perf="maxConcurrent"]').value),
                 maxConcurrentRecord: Number(root.querySelector('[data-perf="maxConcurrentRecord"]').value),
                 recordMs: Number(root.querySelector('[data-perf="recordMs"]').value),
-                clipBitrate: Number(root.querySelector('[data-perf="clipBitrate"]').value),
+                clipQuality: Number(root.querySelector('[data-perf="clipQuality"]').value),
                 clipSettleMs: Number(root.querySelector('[data-perf="clipSettleMs"]').value),
                 maxCache: Number(root.querySelector('[data-perf="maxCache"]').value),
                 clipMaxAgeMin: Number(root.querySelector('[data-perf="clipMaxAgeMin"]').value)
@@ -436,7 +415,7 @@ export const ResourceMonitor = {
     },
 
     /**
-     * 一键还原默认性能配置。
+     * 一键还原默认性能配置（并发按本机核数，其余用产品默认）。
      * @private
      */
     _resetSettings() {
@@ -459,45 +438,37 @@ export const ResourceMonitor = {
             </div>`;
 
         return `
-            <p class="mon-set-tip">直播墙性能参数。加载提高首屏速度；录制过高易卡。不确定请用「自动」+ 还原默认。改动即时生效。</p>
-            ${row('并发模式', `
-                <label class="mon-radio"><input type="radio" name="perfMode" value="auto"> 自动（按核数）</label>
-                <label class="mon-radio"><input type="radio" name="perfMode" value="manual"> 手动</label>
-            `)}
+            <p class="mon-set-tip">直播墙性能参数。加载提高首屏速度；录制过高易卡。一键还原会按本机核数推荐并发。改动即时生效。</p>
             ${row('同时加载路数', `
                 <input type="range" data-perf="maxConcurrent" min="${lim.maxConcurrent.min}" max="${lim.maxConcurrent.max}" step="${lim.maxConcurrent.step}">
                 <span class="mon-set-val" data-perf-val="maxConcurrent"></span>
                 <div class="mon-set-eff" data-eff="maxConcurrent"></div>
-            `, '自动模式下滑块仅作上限；提高可加快首屏铺满')}
+            `, '同时拉流/起播的路数。提高可加快首屏铺满，但更吃带宽与解码；弱机建议贴近推荐值。')}
             ${row('同时录制路数', `
                 <input type="range" data-perf="maxConcurrentRecord" min="${lim.maxConcurrentRecord.min}" max="${lim.maxConcurrentRecord.max}" step="${lim.maxConcurrentRecord.step}">
                 <span class="mon-set-val" data-perf-val="maxConcurrentRecord"></span>
                 <div class="mon-set-eff" data-eff="maxConcurrentRecord"></div>
-            `, '编码峰；弱机建议压低')}
+            `, '同时 MediaRecorder 编码峰。过高易导致整墙卡顿；弱机建议 2。')}
             ${row('循环片段时长', `
                 <input type="range" data-perf="recordMs" min="${lim.recordMs.min}" max="${lim.recordMs.max}" step="${lim.recordMs.step}">
                 <span class="mon-set-val" data-perf-val="recordMs"></span>
-            `)}
-            ${row('片段码率', `
-                <select data-perf="clipBitrate">
-                    <option value="400000">400k</option>
-                    <option value="800000">800k</option>
-                    <option value="1200000">1.2M</option>
-                </select>
-                <span class="mon-set-val" data-perf-val="clipBitrate"></span>
-            `)}
+            `, '每张卡片录成循环缩略图的秒数。越长越生动，但编码更久、缓存更大。')}
+            ${row('清晰度', `
+                <input type="range" data-perf="clipQuality" min="${lim.clipQuality.min}" max="${lim.clipQuality.max}" step="${lim.clipQuality.step}">
+                <span class="mon-set-val" data-perf-val="clipQuality"></span>
+            `, '同时控制列表拉流与片段录制码率。档越高越清晰，但多路同时加载时更吃带宽与 CPU。')}
             ${row('进视口停留再加载', `
                 <input type="range" data-perf="clipSettleMs" min="${lim.clipSettleMs.min}" max="${lim.clipSettleMs.max}" step="${lim.clipSettleMs.step}">
                 <span class="mon-set-val" data-perf-val="clipSettleMs"></span>
-            `, '快速滚过不拉流；0 = 进入即加载')}
+            `, '卡片进入视口后需停稳多久才开始拉流。快速滚过不拉流；0 = 进入即加载。')}
             ${row('片段缓存上限', `
                 <input type="range" data-perf="maxCache" min="${lim.maxCache.min}" max="${lim.maxCache.max}" step="${lim.maxCache.step}">
                 <span class="mon-set-val" data-perf-val="maxCache"></span>
-            `)}
+            `, '本地循环 blob 最多保留个数。越大回滚越少重录，但更占内存。')}
             ${row('片段过期重录', `
                 <input type="range" data-perf="clipMaxAgeMin" min="${lim.clipMaxAgeMin.min}" max="${lim.clipMaxAgeMin.max}" step="${lim.clipMaxAgeMin.step}">
                 <span class="mon-set-val" data-perf-val="clipMaxAgeMin"></span>
-            `, '分钟；超时后重新进视口会后台重录')}
+            `, '缓存片段超过该分钟数后，再次进视口会后台重录，避免画面陈旧。')}
             <button type="button" class="mon-reset-perf">一键还原默认配置</button>
         `;
     },
@@ -511,13 +482,6 @@ export const ResourceMonitor = {
         if (!root || root._bound) return;
         root._bound = true;
 
-        // 模式单选
-        root.querySelectorAll('input[name="perfMode"]').forEach(r => {
-            r.addEventListener('change', () => {
-                this._applySettingsFromForm({ perfMode: r.value });
-            });
-        });
-
         // 滑块：input 更新旁注；change 写库（松手时，避免拖动中狂写 storage）
         root.querySelectorAll('input[type="range"][data-perf]').forEach(el => {
             el.addEventListener('input', () => {
@@ -530,14 +494,6 @@ export const ResourceMonitor = {
                 this._applySettingsFromForm({ [name]: Number(el.value) });
             });
         });
-
-        // 下拉即时
-        const sel = root.querySelector('select[data-perf="clipBitrate"]');
-        if (sel) {
-            sel.addEventListener('change', () => {
-                this._applySettingsFromForm({ clipBitrate: Number(sel.value) });
-            });
-        }
 
         const resetBtn = root.querySelector('.mon-reset-perf');
         if (resetBtn) resetBtn.addEventListener('click', () => this._resetSettings());
@@ -675,7 +631,8 @@ export const ResourceMonitor = {
             .resource-monitor-panel .mon-tab { flex:1; padding:10px 8px; border:none; background:transparent; color:${sub}; font-size:13px; font-weight:500; cursor:pointer; border-bottom:2px solid transparent; margin-bottom:-1px; }
             .resource-monitor-panel .mon-tab:hover { color:${dark ? '#fff' : '#000'}; }
             .resource-monitor-panel .mon-tab.active { color:${dark ? '#fff' : '#1890ff'}; border-bottom-color:#1890ff; font-weight:600; }
-            .resource-monitor-panel .mon-body { padding:14px 16px; overflow-y:auto; flex:1; min-height:0; }
+            .resource-monitor-panel .mon-body { padding:14px 16px; overflow-y:auto; flex:1; min-height:460px; }
+            .resource-monitor-panel .mon-pane { min-height:440px; }
             .resource-monitor-panel .mon-overview { display:flex; gap:10px; margin-bottom:14px; }
             .resource-monitor-panel .mon-stat { flex:1; text-align:center; padding:12px 6px; background:${cardBg}; border:1px solid ${cardBd}; border-radius:10px; }
             .resource-monitor-panel .mon-stat-v { font-size:26px; font-weight:700; line-height:1.05; font-family:${mono}; }

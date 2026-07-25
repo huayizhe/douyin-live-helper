@@ -1,7 +1,6 @@
 /** @charset UTF-8 */
 /**
- * 预加载并发与加载槽释放单元测试。
- * 覆盖：playing 后释加载槽、_pump 能继续起新加载、录制槽仍受上限约束、防二次减槽。
+ * 预加载并发、加载槽释放、稳播/卡顿门控单元测试。
  *
  * 运行：npm test
  */
@@ -13,6 +12,18 @@ import {
     computeRecordConcurrency,
     createLoadSlotHolder
 } from '../js/preload-concurrency.js';
+import {
+    createWarmupState,
+    updateWarmupSample,
+    isWarmupReady,
+    isWarmupTimedOut,
+    createStallState,
+    updateStallSample,
+    shouldDiscardForStutter,
+    WARMUP_NEED_MS,
+    WARMUP_MAX_WAIT_MS,
+    STALL_CONSECUTIVE_MS
+} from '../js/clip-stutter.js';
 
 describe('computeLoadConcurrency', () => {
     it('弱机不低于 8', () => {
@@ -65,6 +76,54 @@ describe('createLoadSlotHolder（防二次减槽）', () => {
         assert.equal(slot.release(), false);
         assert.equal(mgr.activeLoads, 0);
         assert.equal(mgr.pumpCount, 1);
+    });
+});
+
+describe('稳播门控 / 录中卡顿（clip-stutter）', () => {
+    it('currentTime 持续推进约 1s 后达标', () => {
+        let s = createWarmupState(0, 0);
+        // 每 200ms 推进 0.2s 媒体时间，墙钟累计 1000ms
+        for (let i = 1; i <= 5; i++) {
+            s = updateWarmupSample(s, i * 0.2, i * 200);
+        }
+        assert.ok(isWarmupReady(s, WARMUP_NEED_MS));
+        assert.equal(isWarmupTimedOut(s, 1000, WARMUP_MAX_WAIT_MS), false);
+    });
+
+    it('一直不推进则超时未达标', () => {
+        let s = createWarmupState(0, 1.0);
+        for (let t = 100; t <= WARMUP_MAX_WAIT_MS; t += 100) {
+            s = updateWarmupSample(s, 1.0, t); // currentTime 不动
+        }
+        assert.equal(isWarmupReady(s, WARMUP_NEED_MS), false);
+        assert.equal(isWarmupTimedOut(s, WARMUP_MAX_WAIT_MS, WARMUP_MAX_WAIT_MS), true);
+    });
+
+    it('连续停滞超过阈值应丢弃', () => {
+        let s = createStallState(0, 0);
+        s = updateStallSample(s, 0, 100);  // 停 100
+        s = updateStallSample(s, 0, 200);  // 停 200
+        s = updateStallSample(s, 0, 350);  // 停 350 ≥ 300
+        assert.equal(shouldDiscardForStutter(s, { consecutiveMs: STALL_CONSECUTIVE_MS }), true);
+    });
+
+    it('流畅推进不丢弃', () => {
+        let s = createStallState(0, 0);
+        for (let i = 1; i <= 20; i++) {
+            s = updateStallSample(s, i * 0.1, i * 100);
+        }
+        assert.equal(shouldDiscardForStutter(s), false);
+    });
+
+    it('停滞占比过高应丢弃', () => {
+        let s = createStallState(0, 0);
+        // 先推进一点
+        s = updateStallSample(s, 0.5, 200);
+        // 随后大量停滞：总时长 >1s，停滞比 >15%
+        for (let t = 300; t <= 1500; t += 100) {
+            s = updateStallSample(s, 0.5, t);
+        }
+        assert.equal(shouldDiscardForStutter(s, { maxRatio: 0.15, minSampleMs: 1000 }), true);
     });
 });
 

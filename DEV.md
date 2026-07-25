@@ -49,7 +49,7 @@
 6. 声音与音量：
    - 顶部声音总开关（放音/静音）+ 全局音量记忆，使用 chrome.storage.local 存储 (settings.js)
    - 悬浮预览、大屏预览声音状态互相同步
-   - 自 1.4.4 起，同文件还存直播墙性能参数（`getPerfConfig` / `setPerfConfig` / `resetPerfConfig`）
+   - 自 1.4.4 起，同文件还存直播墙性能参数（`getPerfConfig` / `setPerfConfig` / `resetPerfConfig`）；**1.4.5** 起无 `perfMode`，用 `clipQuality`（0–3）替代 `clipBitrate`
 
 7. 直播录制：
    - 大屏单路 / 对比单路 / 对比合并录制，统一 10Mbps 高码率保证清晰度
@@ -370,19 +370,21 @@ douyinfollowplugin/
       使排队列表持续 = 当前视口（天然优先视口，不止重渲染那一刻）。
     - **未改**：`MAX_CONCURRENT` 并发上限；缓存保留（离屏只释放解码、留 blob，靠 LRU `MAX_CACHE=120` 优先淘汰离屏）。
 
-15. 加载与录制并发分离（`preload.js`，自 1.4.1 起；**1.4.3 真正解耦加载槽**；**1.4.4 参数可配置**）：
-    - **加载**并发用 `MAX_CONCURRENT`（字面/硬上限 **15**，自适应 `max(8, min(15, ceil(cores*1.0)))`，
-      `_pump` 以它为上限）——多路同时拉流/起播、快速铺首屏。
-    - **录制（编码）**另由信号量限制到 `MAX_CONCURRENT_RECORD`（自适应 `max(2, min(4, ceil(cores*0.35)))`，
-      弱机 2 / 常见 3 / 强机最高 4）：`_startLoad` 在 `playing` 时**立刻释放加载槽**并 `_pump()`，再
-      `_acquireRecordSlot(recordFn)`；满则把 `recordFn` 排进 `_recordWaiters`、该路 live 继续播等位。
-      `finalizeLoop`/`cleanup`/早退用 `createLoadSlotHolder` 防二次减加载槽；据 `recordStarted` 调
-      `_releaseRecordSlot()` 或 `_cancelRecordWaiter()`。公式与释槽语义抽在 `preload-concurrency.js`，
-      单测见 `test/preload.test.mjs`（`npm test`）。
-    - 画质：`CLIP_BITRATE` 默认 800000；`RECORD_MS` 默认 **6000**（均可在设置面板改）。
-    - **1.4.4**：`SettingsManager` 存 `perfMode`/`maxConcurrent`/…；`PreloadManager.applyPerfConfig` 在
-      `init`（须在 Settings 之后）与 `onPerfChange` 时写入运行时常量；auto 用 `compute*`+用户 cap，
-      manual 直接用滑块值。`modal._clipSettleMs()` 读 `clipSettleMs`。单测 `test/settings-perf.test.mjs`。
+15. 加载与录制并发分离（`preload.js`，自 1.4.1 起；**1.4.3 真正解耦加载槽**；**1.4.4 参数可配置**；**1.4.5 设置简化 + 稳播门控**）：
+    - **加载**并发用 `MAX_CONCURRENT`（区间 **[8, 15]**，滑块值即生效；一键还原用
+      `computeLoadConcurrency(cores)`），`_pump` 以它为上限——多路同时拉流/起播、快速铺首屏。
+    - **录制（编码）**另由信号量限制到 `MAX_CONCURRENT_RECORD`（区间 **[2, 4]**；还原用
+      `computeRecordConcurrency(cores)`）：`_startLoad` 在 `playing` 时**立刻释放加载槽**并 `_pump()`，
+      **稳播门控约 1s**（`clip-stutter.js`）通过后再 `_acquireRecordSlot(recordFn)`；满则排队、live 继续播。
+      录中卡顿（连续停滞 >300ms 或占比 >15%）丢弃 blob、保持 live、走失败重试稍后重录。
+      `finalizeLoop`/`cleanup`/早退用 `createLoadSlotHolder` 防二次减加载槽。公式与释槽在
+      `preload-concurrency.js`，门控纯函数在 `clip-stutter.js`，单测 `test/preload.test.mjs`。
+    - 画质：**1.4.5** 用 `clipQuality` 四档（标清 SD1/400k → 蓝光 FULL_HD1/2M）同时控
+      `getStreamUrlByQuality` 拉流与 `CLIP_BITRATE`；默认档 1（高清）。`RECORD_MS` 默认 **6000**。
+    - **1.4.5**：去掉 `perfMode`；横屏 `.dy-media-blur` z-index 0、video z-index 1，
+      `_removeLoopVideo` 清残留 blur/`_clipHls`。设置项均有说明文案；三 Tab `min-height` 等高。
+    - **1.4.4**：`SettingsManager` 存性能参数；`applyPerfConfig` 在 `init`/`onPerfChange` 写入运行时常量；
+      `modal._clipSettleMs()` 读 `clipSettleMs`。单测 `test/settings-perf.test.mjs`。
     - 监控面板：「片段加载 进行/排队/上限」读 `MAX_CONCURRENT`，「录制（编码）进行/上限」读
       `activeRecords`/`MAX_CONCURRENT_RECORD`。
     - 背景：1.4.0 曾用录制上限当加载上限；1.4.1 分离常量但仍把 `activeLoads` 占到录完；

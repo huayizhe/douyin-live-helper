@@ -13,8 +13,19 @@
 
 import { Logger } from './logger.js';
 import { NetworkUtils, DOMUtils, HLSUtils, StyleUtils } from './utils.js';
-import { SettingsManager } from './settings.js';
+import { SettingsManager, clipQualityToBitrate, clipQualityToStreamCode } from './settings.js';
 import { computeLoadConcurrency, computeRecordConcurrency, createLoadSlotHolder } from './preload-concurrency.js';
+import {
+    createWarmupState,
+    updateWarmupSample,
+    isWarmupReady,
+    isWarmupTimedOut,
+    createStallState,
+    updateStallSample,
+    shouldDiscardForStutter,
+    WARMUP_NEED_MS,
+    WARMUP_MAX_WAIT_MS
+} from './clip-stutter.js';
 
 const HLS = window.Hls;
 
@@ -46,11 +57,11 @@ export const PreloadManager = {
     _playbackPaused: false,
 
     // —— 可调参数 ——
-    // 加载并发上限：多路同时拉流/起播，快速铺首屏（加载相对廉价）。init() 按核数自适应，字面/硬上限 15。
+    // 加载并发上限：多路同时拉流/起播，快速铺首屏（加载相对廉价）。滑块值即生效值，区间 [8, 15]。
     MAX_CONCURRENT: 15,
     // **录制（编码）并发上限**——每路录制一个 MediaRecorder 编码，是 CPU 主负载。
     // 与加载真正解耦：playing 后释放加载槽，录制只占本信号量；满则该路 live 继续播、排队等录位。
-    // init() 按核数自适应，范围 [2, 4]（弱机 2、常见 3、强机最高 4）。
+    // 滑块值即生效值，范围 [2, 4]。一键还原时按核数推荐。
     MAX_CONCURRENT_RECORD: 4,
     // 片段缓存软上限，超出按时间淘汰（120×~0.8MB≈100MB blob，存储非解码）
     MAX_CACHE: 120,
@@ -60,8 +71,10 @@ export const PreloadManager = {
     LOAD_TIMEOUT: 20000,
     // 最大重试次数
     MAX_RETRY: 2,
-    // 录制码率：保证循环缩略图清晰度（恢复原值）
+    // 录制码率：由清晰度档 clipQuality 映射（默认高清 800k）
     CLIP_BITRATE: 800000,
+    // 列表拉流清晰度代码（与 clipQuality 同步）
+    CLIP_STREAM_QUALITY: 'SD2',
     // 片段过期阈值：超过则在重新进视口时后台重录刷新，避免画面陈旧（按分钟配置）
     CLIP_MAX_AGE: 3 * 60 * 1000, // 3 分钟
 
@@ -83,28 +96,25 @@ export const PreloadManager = {
 
     /**
      * 应用直播墙性能配置到运行时常量。
-     * auto：按核数 + 用户 cap 计算加载/录制上限；manual：直接用用户设定值。
+     * 滑块值即生效上限；清晰度档同时写入拉流码与录制码率。
      * 不中断已在途的加载/录制，仅影响后续调度与新录制参数。
      * @param {object} cfg - SettingsManager.getPerfConfig() 形态
      */
     applyPerfConfig(cfg) {
         if (!cfg || typeof cfg !== 'object') return;
         const cores = navigator.hardwareConcurrency || 6;
-        const loadCap = Number(cfg.maxConcurrent) > 0 ? Number(cfg.maxConcurrent) : 15;
-        const recordCap = Number(cfg.maxConcurrentRecord) > 0 ? Number(cfg.maxConcurrentRecord) : 4;
+        const load = Number(cfg.maxConcurrent) > 0 ? Number(cfg.maxConcurrent) : 15;
+        const record = Number(cfg.maxConcurrentRecord) > 0 ? Number(cfg.maxConcurrentRecord) : 4;
 
-        if (cfg.perfMode === 'manual') {
-            // 手动：滑块值即生效上限（仍落在公式同款区间内，由 Settings 钳制）
-            this.MAX_CONCURRENT = Math.max(8, Math.min(15, Math.round(loadCap)));
-            this.MAX_CONCURRENT_RECORD = Math.max(2, Math.min(4, Math.round(recordCap)));
-        } else {
-            // 自动：核数自适应，用户滑块仅作硬上限 cap
-            this.MAX_CONCURRENT = computeLoadConcurrency(cores, loadCap);
-            this.MAX_CONCURRENT_RECORD = computeRecordConcurrency(cores, recordCap);
-        }
+        // 滑块值即生效（Settings 已钳制到合法区间）
+        this.MAX_CONCURRENT = Math.max(8, Math.min(15, Math.round(load)));
+        this.MAX_CONCURRENT_RECORD = Math.max(2, Math.min(4, Math.round(record)));
 
         if (Number(cfg.recordMs) > 0) this.RECORD_MS = Number(cfg.recordMs);
-        if (Number(cfg.clipBitrate) > 0) this.CLIP_BITRATE = Number(cfg.clipBitrate);
+        // 清晰度档 → 拉流码 + 录制码率
+        const tier = cfg.clipQuality != null ? Number(cfg.clipQuality) : 1;
+        this.CLIP_STREAM_QUALITY = clipQualityToStreamCode(tier);
+        this.CLIP_BITRATE = clipQualityToBitrate(tier);
         if (Number(cfg.maxCache) > 0) this.MAX_CACHE = Math.round(Number(cfg.maxCache));
         // clipMaxAgeMin 为分钟 → 内部毫秒
         if (Number(cfg.clipMaxAgeMin) > 0) {
@@ -112,9 +122,10 @@ export const PreloadManager = {
         }
 
         Logger.log(
-            `性能参数已应用：模式=${cfg.perfMode || 'auto'} 加载=${this.MAX_CONCURRENT} 录制=${this.MAX_CONCURRENT_RECORD}` +
-            ` 时长=${this.RECORD_MS}ms 码率=${this.CLIP_BITRATE} 缓存=${this.MAX_CACHE} 过期=${cfg.clipMaxAgeMin}min` +
-            `（核数 ${cores}）`
+            `性能参数已应用：加载=${this.MAX_CONCURRENT} 录制=${this.MAX_CONCURRENT_RECORD}` +
+            ` 时长=${this.RECORD_MS}ms 清晰度档=${tier}(${this.CLIP_STREAM_QUALITY}/${this.CLIP_BITRATE})` +
+            ` 缓存=${this.MAX_CACHE} 过期=${cfg.clipMaxAgeMin}min` +
+            `（核数 ${cores}，推荐加载 ${computeLoadConcurrency(cores)} / 录制 ${computeRecordConcurrency(cores)}）`
         );
         // 上限变大时尝试继续调度排队任务
         this._pump();
@@ -316,8 +327,9 @@ export const PreloadManager = {
     },
 
     /**
-     * 启动单路：在**可见卡片**里直接播低清实时（第 0 秒就动），起播后申请录制槽再录；
-     * 录满 RECORD_MS 后把同一个 video 无缝切到本地循环 blob 并断开直播。消除「录满才显示」的空窗。
+     * 启动单路：在**可见卡片**里直接播设定清晰度实时（第 0 秒就动），
+     * playing 后稳播门控约 1s，再申请录制槽；录中卡顿则丢弃并稍后重录。
+     * 录满 RECORD_MS 后把同一个 video 无缝切到本地循环 blob 并断开直播。
      * @private
      */
     _startLoad(live) {
@@ -338,7 +350,7 @@ export const PreloadManager = {
         // 本路加载槽持有器：playing 后立刻释放并 _pump；finalize/cleanup/早退用同一持有器防二次减槽
         const loadSlot = createLoadSlotHolder(this);
 
-        const url = NetworkUtils.getLowestQualityUrl(live.streamUrlHlsMap);
+        const url = NetworkUtils.getStreamUrlByQuality(live.streamUrlHlsMap, this.CLIP_STREAM_QUALITY);
         if (!url) {
             loadSlot.release();
             this._finishLoad(roomUrl, false, '无可用流地址', null, live, null);
@@ -350,7 +362,7 @@ export const PreloadManager = {
         const video = document.createElement('video');
         Object.assign(video.style, {
             position: 'absolute', top: '0', left: '0', width: '100%', height: '100%',
-            objectFit: 'cover', zIndex: '0'
+            objectFit: 'cover', zIndex: '1' // 高于 .dy-media-blur(0)，避免横屏模糊层盖住
         });
         video.muted = true;
         video.volume = 0;
@@ -367,10 +379,18 @@ export const PreloadManager = {
         let done = false;
         let recordStarted = false; // 是否已占用录制槽（决定离场/收尾时如何释放）
         let aspect = null; // 宽高比 = videoWidth/videoHeight，用于横竖屏渲染
+        let recordTimer = null; // RECORD_MS 定时器
+        let stallTimer = null; // 录中卡顿轮询
         const chunks = [];
 
         // 整体超时保护
         const timeout = setTimeout(() => { if (!done) cleanup('加载超时'); }, this.LOAD_TIMEOUT);
+
+        /** 停掉录制定时与卡顿监测 */
+        const clearRecordWatchers = () => {
+            if (recordTimer) { clearTimeout(recordTimer); recordTimer = null; }
+            if (stallTimer) { clearInterval(stallTimer); stallTimer = null; }
+        };
 
         // 占用录制槽后真正起录的回调（满则被排队，等释放时再调）
         const recordFn = () => {
@@ -379,16 +399,48 @@ export const PreloadManager = {
             startRecording();
         };
 
+        /**
+         * 丢弃本次录制但尽量保留 live 画面，走失败重试路径稍后重录。
+         * 与 cleanup 不同：先停录制器，再在 _removeLoopVideo 之前由后续 _startLoad 替换。
+         */
+        const discardKeepLive = (reason) => {
+            if (done) return;
+            done = true;
+            clearTimeout(timeout);
+            clearRecordWatchers();
+            loadSlot.release();
+            if (recordStarted) this._releaseRecordSlot();
+            else this._cancelRecordWaiter(recordFn);
+            try { if (recorder) { recorder.onstop = null; if (recorder.state !== 'inactive') recorder.stop(); } } catch (_) {}
+            recorder = null;
+            // 保留 hls/video 继续播 live；挂到卡片上以便 _removeLoopVideo / 离场时销毁
+            if (hls) cardPreview._clipHls = hls;
+            cardPreview._clipLoading = false;
+            cardPreview._clipAbort = () => {
+                try { if (cardPreview._clipHls) { cardPreview._clipHls.stopLoad(); cardPreview._clipHls.destroy(); } } catch (_) {}
+                cardPreview._clipHls = null;
+                if (cardPreview._clipVideo === video) {
+                    try { video.pause(); video.src = ''; video.remove(); } catch (_) {}
+                    cardPreview._clipVideo = null;
+                }
+                cardPreview._clipAbort = null;
+            };
+            Logger.warn('录制丢弃，稍后重录:', reason, roomUrl);
+            this._finishLoad(roomUrl, false, reason, null, live, aspect);
+        };
+
         // 失败/中止：销毁实例、移除可见视频；释放加载槽（若尚未在 playing 释放）与录制槽
         const cleanup = (reason) => {
             if (done) return;
             done = true;
             clearTimeout(timeout);
+            clearRecordWatchers();
             loadSlot.release(); // 未出画面就失败时仍须释加载槽；已释则 no-op
             if (recordStarted) this._releaseRecordSlot();
             else this._cancelRecordWaiter(recordFn); // 还在等录位就直接撤销
             try { if (recorder) { recorder.onstop = null; if (recorder.state !== 'inactive') recorder.stop(); } } catch (_) {}
             try { if (hls) { hls.stopLoad(); hls.destroy(); } } catch (_) {}
+            cardPreview._clipHls = null;
             if (cardPreview._clipVideo === video) {
                 try { video.pause(); video.src = ''; video.remove(); } catch (_) {}
                 cardPreview._clipVideo = null;
@@ -403,9 +455,11 @@ export const PreloadManager = {
             if (done) return;
             done = true;
             clearTimeout(timeout);
+            clearRecordWatchers();
             loadSlot.release(); // 正常路径 playing 已释；异常路径（未触发 playing）兜底防泄漏
             if (recordStarted) this._releaseRecordSlot();
             try { if (hls) { hls.stopLoad(); hls.destroy(); hls = null; } } catch (_) {}
+            cardPreview._clipHls = null;
             video.loop = true;
             video.src = blobUrl;
             cardPreview._clipLoading = false;
@@ -429,7 +483,7 @@ export const PreloadManager = {
             }
         });
 
-        // 录满 RECORD_MS 后停止录制，落地 blob
+        // 录满 RECORD_MS 后停止录制，落地 blob；期间监测卡顿
         const startRecording = () => {
             const mimeType = this._pickMimeType();
             try {
@@ -443,23 +497,75 @@ export const PreloadManager = {
             }
             recorder.ondataavailable = (e) => { if (e.data && e.data.size) chunks.push(e.data); };
             recorder.onstop = () => {
+                if (done) return; // 已被 discard/cleanup
                 if (!chunks.length) { cleanup('录制无数据'); return; }
                 const blob = new Blob(chunks, { type: chunks[0].type || 'video/webm' });
                 finalizeLoop(URL.createObjectURL(blob), blob.size);
             };
             recorder.start();
-            setTimeout(() => { try { if (recorder.state !== 'inactive') recorder.stop(); } catch (_) {} }, this.RECORD_MS);
+
+            // 录中卡顿监测：连续停滞或占比过高 → 丢弃并稍后重录（保持 live）
+            let stall = createStallState(performance.now(), video.currentTime);
+            stallTimer = setInterval(() => {
+                if (done || !recorder) return;
+                stall = updateStallSample(stall, video.currentTime, performance.now());
+                if (shouldDiscardForStutter(stall)) {
+                    discardKeepLive('录中卡顿');
+                }
+            }, 100);
+
+            recordTimer = setTimeout(() => {
+                try { if (recorder && recorder.state !== 'inactive') recorder.stop(); } catch (_) {}
+            }, this.RECORD_MS);
         };
 
-        // 出画面即释放加载槽并 _pump（与录制解耦）；再申请录制槽（满则 live 继续播、排队等录位）
+        /**
+         * playing 后稳播门控：约 1s 内 currentTime 持续推进才申请录制槽；超时则丢弃本轮。
+         * @returns {Promise<boolean>}
+         */
+        const waitStablePlayback = () => new Promise((resolve) => {
+            let state = createWarmupState(performance.now(), video.currentTime);
+            const onTu = () => {
+                if (done) return;
+                state = updateWarmupSample(state, video.currentTime, performance.now());
+            };
+            video.addEventListener('timeupdate', onTu);
+            const finish = (ok) => {
+                video.removeEventListener('timeupdate', onTu);
+                resolve(ok);
+            };
+            const run = () => {
+                if (done) { finish(false); return; }
+                const now = performance.now();
+                state = updateWarmupSample(state, video.currentTime, now);
+                if (isWarmupReady(state, WARMUP_NEED_MS)) { finish(true); return; }
+                if (isWarmupTimedOut(state, now, WARMUP_MAX_WAIT_MS)) { finish(false); return; }
+                if (typeof video.requestVideoFrameCallback === 'function') {
+                    video.requestVideoFrameCallback(() => run());
+                } else {
+                    setTimeout(run, 100);
+                }
+            };
+            run();
+        });
+
+        // 出画面即释放加载槽并 _pump；稳播通过后再申请录制槽
         video.addEventListener('playing', () => {
             if (done || recorder || recordStarted) return;
             loadSlot.release();
-            this._acquireRecordSlot(recordFn);
+            waitStablePlayback().then((ok) => {
+                if (done) return;
+                if (!ok) {
+                    discardKeepLive('稳播门控未通过');
+                    return;
+                }
+                this._acquireRecordSlot(recordFn);
+            });
         }, { once: true });
 
         if (HLS && HLS.isSupported()) {
             hls = new HLS(HLSUtils.createPreloadConfig());
+            cardPreview._clipHls = hls;
             hls.on(HLS.Events.ERROR, (event, data) => {
                 if (data && data.fatal && !recorder) cleanup('HLS致命错误');
             });
@@ -572,7 +678,7 @@ export const PreloadManager = {
         const video = document.createElement('video');
         Object.assign(video.style, {
             position: 'absolute', top: '0', left: '0', width: '100%', height: '100%',
-            objectFit: 'cover', zIndex: '0'
+            objectFit: 'cover', zIndex: '1' // 高于 .dy-media-blur(0)
         });
         video.src = cached.blobUrl;
         video.loop = true;
@@ -662,13 +768,23 @@ export const PreloadManager = {
 
     /**
      * 移除卡片上的循环视频，释放解码（保留缓存 blob）。
+     * 顺带销毁残留 HLS、清除 .dy-media-blur，避免滚回重挂时模糊层盖住画面。
      * @private
      */
     _removeLoopVideo(cardPreview) {
-        const v = cardPreview && cardPreview._clipVideo;
+        if (!cardPreview) return;
+        // 丢弃录制后仍挂着的 live HLS
+        if (cardPreview._clipHls) {
+            try { cardPreview._clipHls.stopLoad(); cardPreview._clipHls.destroy(); } catch (_) {}
+            cardPreview._clipHls = null;
+        }
+        const v = cardPreview._clipVideo;
         if (v) {
             try { v.pause(); v.src = ''; v.remove(); } catch (_) {}
             cardPreview._clipVideo = null;
         }
+        // 无 video 时清掉残留模糊层（滚走只卸 video 会留下 blur）
+        const blur = cardPreview.querySelector(':scope > .dy-media-blur');
+        if (blur) blur.remove();
     }
 };
