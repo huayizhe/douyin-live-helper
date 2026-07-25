@@ -60,11 +60,12 @@
    - 文件命名区分：`抖音对比-单路_…` / `抖音对比-合并_…`
    - 大屏录制指示器：左下角红色闪烁圆点 + 时间；停止仅弹一条「视频保存成功」（不再「录制已停止」+「保存成功」双弹）
 
-8. 资源 / 设置统一面板 (monitor.js，自 1.4.4)：
+8. 资源 / 设置统一面板 (monitor.js，自 1.4.4；**1.4.6** 固定壳高)：
    - 顶栏「资源/设置」打开；三 Tab：资源监控 / 插件设置 / 数据备份
    - 监控：内存 / HLS / video；仅监控 Tab 激活时 1s 采样
-   - 插件设置：直播墙性能参数（自动/手动并发、时长、码率、settle、缓存、过期），即时 `SettingsManager.setPerfConfig` → `PreloadManager.applyPerfConfig`，一键还原
+   - 插件设置：直播墙性能参数（并发、时长、清晰度、settle、缓存、过期），即时 `SettingsManager.setPerfConfig` → `PreloadManager.applyPerfConfig`，一键还原
    - 数据备份：特别关心导入/导出（原顶栏「备份」按钮已移除）
+   - **1.4.6**：面板 `height`/`maxHeight` 同为 `min(86vh, 720px)`（`monitor-panel-layout.js`），`mon-body` `flex:1; min-height:0` 内部滚；三 Tab 切页壳高不变，备份不塌缩
 
 9. 快捷跳转：
    - 点击直播画面进入大屏预览，点击标题跳转直播间，点击主播头像跳转个人主页
@@ -115,6 +116,9 @@ douyinfollowplugin/
 │   ├── license.js      # PRO 授权：离线 ECDSA 验签、激活/解除、权益对比升级页
 │   ├── preload.js      # 预加载管理（按需）
 │   ├── preload-concurrency.js # 加载/录制并发公式与加载槽持有器（纯函数，单测共用）
+│   ├── playback-gate.js       # 视口播放门控常量/纯函数（1.4.6）
+│   ├── monitor-panel-layout.js# 三 Tab 面板固定壳高（1.4.6）
+│   ├── hover-preview-gate.js  # 悬浮预览 z-index / pause 时机（1.4.6）
 │   ├── monitor.js      # 资源/设置统一面板（监控 / 性能设置 / 备份）
 │   ├── toast.js        # 轻提示模块
 │   ├── constants.js    # 常量定义（选择器、清晰度、语音等）
@@ -122,7 +126,8 @@ douyinfollowplugin/
 │   └── logger.js       # 日志模块，提供统一的日志输出
 ├── test/               # 单元测试（npm test → node --test）
 │   ├── preload.test.mjs
-│   └── settings-perf.test.mjs
+│   ├── settings-perf.test.mjs
+│   └── playback-hover-panel.test.mjs
 ├── lib/                # 第三方库
 │   └── hls.min.js      # HLS 播放器，用于直播流播放
 ├── css/                # 样式文件
@@ -348,16 +353,16 @@ douyinfollowplugin/
 12. 设备识别码生成：见 `## PRO 授权架构` 第 4 节「设备识别码（机器绑定）」。简言之——`getMachineId()` 缓存缺失时由
     `_computeFingerprint()` 用稳定信号 SHA-256 确定性派生（`fp-` 前缀），重装后能算出同一标识，旧激活码继续生效。
 
-13. 视口播放门控（`modal.js` `_setupPlaybackObserver`，自 1.3.2 起）：
+13. 视口播放门控（`modal.js` `_setupPlaybackObserver`，自 1.3.2 起；**1.4.6** 放宽）：
     - 与既有加载观察器 `_clipObserver`（负责预加载/缓存调度）**解耦**，
-      新增一个独立的 `IntersectionObserver`（`rootMargin: 0px`、`threshold: [0, 1]`）只管「是否播放」。
-    - 回调里 `entry.intersectionRatio >= 0.999` 视为完整可见 → `PreloadManager.resumeCard()`；否则 → `pauseCard()`。
-      同时把 `cardPreview._shouldPlay = boolean` 写到卡片上。
+      独立的 `IntersectionObserver` 只管「是否播放」。常量与纯函数在 `playback-gate.js`。
+    - **1.4.6**：`PLAY_VISIBLE_RATIO=0.35`（露出约 1/3 即播）、`PLAY_ROOT_MARGIN='300px 0px'`、
+      `threshold: [0, 0.25, 0.35, 0.5, 0.75, 1]`；`shouldPlayCard` → `resumeCard` / `pauseCard`，
+      并写 `cardPreview._shouldPlay`。加载观察器仍 `rootMargin: 0` / `threshold: 0.01` 不变。
     - `preload.js` 的 `attachLoop` / `_startLoad.finalizeLoop` / `resumeCard` 在调用 `video.play()` 前检查
-      `cardPreview._shouldPlay !== false`——处理「加载/录制完成时卡片正好不完全可见」的竞态
+      `cardPreview._shouldPlay !== false`——处理「加载/录制完成时卡片正好不应播放」的竞态
       （IO 不会自动再触发回调）。`pauseCard` 仍跳过 `_clipLoading=true` 的卡片，避免污染录制。
-    - 效果：同屏播放路数严格 = 当前视口完全容纳数（典型 ~12）。滚动出去的卡片立即暂停解码，
-      未滚到的卡片即使已缓存也不播。
+    - 效果：半截滚出仍可继续播约两排；离开扩展视口才 pause。卸 video 仍由 clip 观察器负责。
 
 14. 循环片段流水线 & 重渲染重置（`preload.js` + `modal.js`，自 1.3.3 起）：
     - **重渲染硬重置**：`renderLiveList` 在 `container.innerHTML=''` **之前**调 `PreloadManager.resetForRerender()`——
@@ -382,7 +387,8 @@ douyinfollowplugin/
     - 画质：**1.4.5** 用 `clipQuality` 四档（标清 SD1/400k → 蓝光 FULL_HD1/2M）同时控
       `getStreamUrlByQuality` 拉流与 `CLIP_BITRATE`；默认档 1（高清）。`RECORD_MS` 默认 **6000**。
     - **1.4.5**：去掉 `perfMode`；横屏 `.dy-media-blur` z-index 0、video z-index 1，
-      `_removeLoopVideo` 清残留 blur/`_clipHls`。设置项均有说明文案；三 Tab `min-height` 等高。
+      `_removeLoopVideo` 清残留 blur/`_clipHls`。设置项均有说明文案。
+    - **1.4.6**：三 Tab 改为面板固定壳高（见第 8 节），不再靠 pane `min-height` 顶高。
     - **1.4.4**：`SettingsManager` 存性能参数；`applyPerfConfig` 在 `init`/`onPerfChange` 写入运行时常量；
       `modal._clipSettleMs()` 读 `clipSettleMs`。单测 `test/settings-perf.test.mjs`。
     - 监控面板：「片段加载 进行/排队/上限」读 `MAX_CONCURRENT`，「录制（编码）进行/上限」读
@@ -394,8 +400,12 @@ douyinfollowplugin/
     哨兵 + `_batchObserver`（rootMargin 600px）滚到底追加下一批；`_appendCards` 复用建卡逻辑并对每张
     `observe` 两个视口观察器；`_teardownBatchObserver` 在重渲染/ESC 关/X 关处断开。不支持 IO 时一次性补齐。
 
-17. 悬浮防误触（`preview.js` `setupPreview`，自 1.4.0 起）：`pauseCard` + `pauseLoading('hover')` 已并入
-    既有 200ms 去抖回调（原先在 mouseenter 立即执行）。快速掠过不再停循环、不卡预加载。
+17. 悬浮防误触与循环衔接（`preview.js` `setupPreview`，自 1.4.0 起；**1.4.6** 延后 pauseCard）：
+    - 200ms 去抖保留：快速掠过不拉 HLS、不卡预加载。
+    - **保留** `pauseLoading('hover')`：悬浮专注这一路时整墙暂停启动新片段。
+    - **1.4.6**：超时回调**不再立刻** `pauseCard`；hover live `z-index:2`（`hover-preview-gate.js`）叠在循环
+      （z-index:1）之上；`playVideo` 成功且 opacity=1 后再对本卡 `pauseCard`。取流/播放失败则循环继续。
+      `mouseleave` 仍 `clearPreview` + `resumeCard` + `resumeLoading('hover')`。
 
 18. 大屏画中画（`preview.js` `createPipBtn`）：**自 1.4.1 起已下线**——大屏控制栏不再创建/append PiP 按钮
     （`createControlBar` 内两处已注释）。`createPipBtn` 方法**保留**（作用于 `this.currentBigVideo`，切清晰度后动态取；

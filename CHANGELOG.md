@@ -5,6 +5,19 @@
 
 ---
 
+## [1.4.6] - 2026-07-25
+
+### 体验
+- **放宽视口播放门控**（`modal.js` / `playback-gate.js`）：循环播放由「须完整可见」改为露出约 1/3（`PLAY_VISIBLE_RATIO=0.35`）即可播，并加上下 `PLAY_ROOT_MARGIN=300px`（约一排缓冲）；加载观察器 `_clipObserver` 不变。半截滚出仍可播约两排，离开扩展视口才 pause。
+- **三 Tab 面板固定壳高**（`monitor.js`）：`height`/`maxHeight` 同为 `min(86vh, 720px)`；`mon-body` 用 `flex:1; min-height:0` 内部滚动。切到「数据备份」时窗口高度与监控/设置一致，不再因内容少塌缩。
+- **悬浮预览与循环衔接**（`preview.js`）：停留 ≥200ms 后仍 `pauseLoading('hover')`，但**不立刻** `pauseCard`；hover live `z-index:2` 叠在循环之上，`play` 成功且 opacity=1 后再 pause 本卡；取流/播放失败则循环继续。
+
+### 测试 / 文档
+- 单测覆盖播放门控阈值、面板壳高、悬浮 pause 时机与 z-index。
+- 版本升至 1.4.6；同步 DEV。
+
+---
+
 ## [1.4.5] - 2026-07-25
 
 ### 修复

@@ -14,6 +14,11 @@ import { ToastManager } from './toast.js';
 import { LicenseManager } from './license.js';
 import { StatsManager } from './stats.js';
 import { LICENSE } from './constants.js';
+import {
+    PLAY_ROOT_MARGIN,
+    PLAY_THRESHOLDS,
+    shouldPlayCard
+} from './playback-gate.js';
 
 const ModalUI = {
     /**
@@ -809,10 +814,9 @@ const ModalUI = {
     },
 
     /**
-     * 视口播放门控：仅**完整可见**的卡片（threshold:1）才播放，部分/全部被滚动裁切的一律暂停。
-     * 与 `_clipObserver` 解耦——加载仍由 `_clipObserver` 以 rootMargin `0px`、threshold `0.01` 严格视口触发
-     *（进视口加载 / 离视口 release；`CLIP_SETTLE_MS` 防快速滑动误拉流），
-     * 播放只在完整可见时进行，保证最多同时播放当前视口里能完全容纳的那些（典型 ~12 路）。
+     * 视口播放门控：露出约 1/3（PLAY_VISIBLE_RATIO=0.35）且在扩展视口内（PLAY_ROOT_MARGIN=300px）即播；
+     * 离开扩展视口仍 pauseCard。与 `_clipObserver` 解耦——加载仍以 rootMargin `0px`、threshold `0.01`
+     * 严格视口触发（进视口加载 / 离视口 release；`CLIP_SETTLE_MS` 防快速滑动误拉流），卸 video 仍由 clip 观察器负责。
      * @private
      */
     _setupPlaybackObserver(scrollRoot) {
@@ -821,15 +825,15 @@ const ModalUI = {
         this._playbackObserver = new IntersectionObserver((entries) => {
             entries.forEach(entry => {
                 const cardPreview = entry.target;
-                // intersectionRatio 接近 1 视为完整可见（容忍亚像素抖动）
-                const fullyVisible = entry.isIntersecting && entry.intersectionRatio >= 0.999;
+                // 露出约 1/3 即允许播放；上下 rootMargin 提供约一排缓冲
+                const shouldPlay = shouldPlayCard(entry.isIntersecting, entry.intersectionRatio);
                 // 在卡片上标记期望播放状态，preload.js 的 finalizeLoop/attachLoop 在挂上视频后会读它
-                // 以处理「加载完成时正好不完全可见」的竞态（IO 不会自动再触发一次回调）
-                cardPreview._shouldPlay = fullyVisible;
-                if (fullyVisible) PreloadManager.resumeCard(cardPreview);
+                // 以处理「加载完成时正好不应播放」的竞态（IO 不会自动再触发一次回调）
+                cardPreview._shouldPlay = shouldPlay;
+                if (shouldPlay) PreloadManager.resumeCard(cardPreview);
                 else PreloadManager.pauseCard(cardPreview);
             });
-        }, { root: scrollRoot || null, rootMargin: '0px', threshold: [0, 1] });
+        }, { root: scrollRoot || null, rootMargin: PLAY_ROOT_MARGIN, threshold: PLAY_THRESHOLDS });
     },
 
     /**

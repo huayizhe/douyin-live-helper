@@ -19,6 +19,7 @@ import { TOAST } from './constants.js';
 import { SettingsManager, PERF_LIMITS, CLIP_QUALITY_TIERS } from './settings.js';
 import { FavoriteManager } from './favorite.js';
 import { computeLoadConcurrency, computeRecordConcurrency } from './preload-concurrency.js';
+import { getMonitorPanelShellStyles } from './monitor-panel-layout.js';
 
 export const ResourceMonitor = {
     panel: null,
@@ -565,11 +566,14 @@ export const ResourceMonitor = {
     createMonitorPanel() {
         const dark = StyleUtils.isDarkMode();
         const sub = dark ? '#8a8f99' : '#9aa0a6';
+        // 三 Tab 固定同一壳高（height = maxHeight），备份内容少时不塌缩
+        const shell = getMonitorPanelShellStyles();
         this.panel = DOMUtils.createElement('div', {
             className: 'resource-monitor-panel',
             styles: {
                 position: 'fixed', top: '50%', left: '50%', transform: 'translate(-50%, -50%)',
-                width: '560px', maxHeight: '86vh', background: dark ? '#1f1f1f' : '#fff',
+                width: '560px', height: shell.height, maxHeight: shell.maxHeight,
+                background: dark ? '#1f1f1f' : '#fff',
                 borderRadius: '8px', boxShadow: '0 4px 20px rgba(0,0,0,0.3)', zIndex: 20002,
                 display: 'none', flexDirection: 'column', color: dark ? '#fff' : '#000',
                 fontSize: '13px'
@@ -631,8 +635,7 @@ export const ResourceMonitor = {
             .resource-monitor-panel .mon-tab { flex:1; padding:10px 8px; border:none; background:transparent; color:${sub}; font-size:13px; font-weight:500; cursor:pointer; border-bottom:2px solid transparent; margin-bottom:-1px; }
             .resource-monitor-panel .mon-tab:hover { color:${dark ? '#fff' : '#000'}; }
             .resource-monitor-panel .mon-tab.active { color:${dark ? '#fff' : '#1890ff'}; border-bottom-color:#1890ff; font-weight:600; }
-            .resource-monitor-panel .mon-body { padding:14px 16px; overflow-y:auto; flex:1; min-height:460px; }
-            .resource-monitor-panel .mon-pane { min-height:440px; }
+            .resource-monitor-panel .mon-body { padding:14px 16px; overflow-y:auto; flex:1; min-height:0; }
             .resource-monitor-panel .mon-overview { display:flex; gap:10px; margin-bottom:14px; }
             .resource-monitor-panel .mon-stat { flex:1; text-align:center; padding:12px 6px; background:${cardBg}; border:1px solid ${cardBd}; border-radius:10px; }
             .resource-monitor-panel .mon-stat-v { font-size:26px; font-weight:700; line-height:1.05; font-family:${mono}; }

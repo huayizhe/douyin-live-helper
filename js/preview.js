@@ -13,6 +13,7 @@ import { SettingsManager } from './settings.js';
 import { LicenseManager } from './license.js';
 import { AtmosphereManager } from './atmosphere.js';
 import { StatsManager } from './stats.js';
+import { HOVER_LIVE_Z_INDEX, shouldPauseLoopAfterHoverLive } from './hover-preview-gate.js';
 
 // 确保 HLS.js 可用
 const HLS = window.Hls;
@@ -235,12 +236,12 @@ wow，好热闹;
             isHovering = true;
             Logger.log('开始预览:', live.anchor);
 
-            // 短延迟防快速划过误触：暂停循环/暂停预加载/切实时流统一推迟到停留 ≥200ms 后再做，
-            // 否则鼠标横扫一排卡片会瞬时停掉每一路循环、反复卡住整条预加载。
+            // 短延迟防快速划过误触：暂停预加载 / 切实时流统一推迟到停留 ≥200ms 后再做，
+            // 否则鼠标横扫一排卡片会反复卡住整条预加载、误拉 HLS。
+            // 本卡循环片段在此阶段继续播放（不立刻 pauseCard），等 live play 成功淡入后再替换。
             this.previewTimer = setTimeout(() => {
                 if (!isHovering || !live.streamUrlHlsMap) return;
-                // 真正停留专注这一路：暂停循环片段、暂停启动新片段预加载，带宽/CPU 让给实时流
-                PreloadManager.pauseCard(cardPreview);
+                // 保留 pauseLoading：悬浮专注这一路时整墙暂停启动新片段，带宽/CPU 让给实时预览
                 PreloadManager.pauseLoading('hover');
                 loadingEl.style.display = 'block';
                 this.startStreamPreview(cardPreview, live, loadingEl);
@@ -279,7 +280,8 @@ wow，好热闹;
                 transform: 'translate(-50%, -50%)',
                 opacity: 0,
                 transition: 'opacity 0.3s',
-                zIndex: '1'  // 叠在循环片段(0)之上、信息条/序号/复选框等覆盖层之下
+                // 高于循环片段 video(z-index:1)，opacity=1 后才能盖住循环；仍低于信息条/序号等覆盖层
+                zIndex: HOVER_LIVE_Z_INDEX
             });
 
             // 拿到真实宽高比后按横竖屏渲染（竖屏铺满 / 横屏完整居中+模糊填充）
@@ -360,6 +362,10 @@ wow，好热闹;
                         this.playVideo()
                             .then(() => {
                                 loadingEl.style.display = 'none';
+                                // live 已 opacity=1 盖住循环后再 pause 本卡，节省解码；失败则不 pause
+                                if (shouldPauseLoopAfterHoverLive(true)) {
+                                    PreloadManager.pauseCard(cardPreview);
+                                }
                                 this.scheduleProactiveCapture(cardPreview, live);
                             })
                             .catch(() => {
@@ -386,6 +392,10 @@ wow，好热闹;
                     this.playVideo()
                         .then(() => {
                             loadingEl.style.display = 'none';
+                            // live 已 opacity=1 盖住循环后再 pause 本卡，节省解码；失败则不 pause
+                            if (shouldPauseLoopAfterHoverLive(true)) {
+                                PreloadManager.pauseCard(cardPreview);
+                            }
                             this.scheduleProactiveCapture(cardPreview, live);
                         })
                         .catch(() => {
