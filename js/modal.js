@@ -792,8 +792,9 @@ const ModalUI = {
 
     /**
      * 视口播放门控：仅**完整可见**的卡片（threshold:1）才播放，部分/全部被滚动裁切的一律暂停。
-     * 与 `_clipObserver` 解耦——加载/缓存仍按更宽的 rootMargin 推进（300px 提前缓冲），
-     * 但播放只在严格视口内进行，保证最多同时播放当前视口里能完全容纳的那些（典型 ~12 路）。
+     * 与 `_clipObserver` 解耦——加载仍由 `_clipObserver` 以 rootMargin `0px`、threshold `0.01` 严格视口触发
+     *（进视口加载 / 离视口 release；`CLIP_SETTLE_MS` 防快速滑动误拉流），
+     * 播放只在完整可见时进行，保证最多同时播放当前视口里能完全容纳的那些（典型 ~12 路）。
      * @private
      */
     _setupPlaybackObserver(scrollRoot) {

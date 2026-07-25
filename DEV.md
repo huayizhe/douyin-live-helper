@@ -109,11 +109,14 @@ douyinfollowplugin/
 │   ├── stats.js        # 本地观看统计：每主播本周次数/时长（chrome.storage.local，按 ISO 周清零）
 │   ├── license.js      # PRO 授权：离线 ECDSA 验签、激活/解除、权益对比升级页
 │   ├── preload.js      # 预加载管理（按需）
+│   ├── preload-concurrency.js # 加载/录制并发公式与加载槽持有器（纯函数，单测共用）
 │   ├── monitor.js      # 资源监控模块
 │   ├── toast.js        # 轻提示模块
 │   ├── constants.js    # 常量定义（选择器、清晰度、语音等）
 │   ├── utils.js        # 通用工具模块（DOM/样式/网络/语音/文本）
 │   └── logger.js       # 日志模块，提供统一的日志输出
+├── test/               # 单元测试（npm test → node --test）
+│   └── preload.test.mjs
 ├── lib/                # 第三方库
 │   └── hls.min.js      # HLS 播放器，用于直播流播放
 ├── css/                # 样式文件
@@ -361,14 +364,20 @@ douyinfollowplugin/
       使排队列表持续 = 当前视口（天然优先视口，不止重渲染那一刻）。
     - **未改**：`MAX_CONCURRENT` 并发上限；缓存保留（离屏只释放解码、留 blob，靠 LRU `MAX_CACHE=120` 优先淘汰离屏）。
 
-15. 加载与录制并发分离（`preload.js`，自 1.4.1 起）：**加载**并发用 `MAX_CONCURRENT`（自适应 cores*0.75、≤9，
-    `_pump` 以它为上限）——多路同时拉流/起播、快速铺画面。**录制（编码）**另由信号量限制到 `MAX_CONCURRENT_RECORD`
-    （自适应 2–3）：`_startLoad` 在 `playing` 时 `_acquireRecordSlot(recordFn)`，满则把 `recordFn` 排进 `_recordWaiters`、
-    该路 live 流继续播等位；`finalizeLoop`/`cleanup` 据 `recordStarted` 调 `_releaseRecordSlot()`（唤起下一个等待者）
-    或 `_cancelRecordWaiter()`（离屏撤销未起录者）。`activeRecords` 计当前编码数。
-    画质参数恢复：`CLIP_BITRATE=800000`、`RECORD_MS=8000`、预加载 HLS 配置不再覆盖 `lowLatencyMode`。
-    监控面板：「片段加载 进行/排队/上限」读 `MAX_CONCURRENT`，新增「录制（编码）进行/上限」读 `activeRecords`/`MAX_CONCURRENT_RECORD`。
-    背景：1.4.0 曾用 `MAX_CONCURRENT_RECORD` 当加载上限把加载也压到 3，导致铺画面变慢，故 1.4.1 分离。
+15. 加载与录制并发分离（`preload.js`，自 1.4.1 起；**1.4.3 真正解耦加载槽**）：
+    - **加载**并发用 `MAX_CONCURRENT`（字面/硬上限 **15**，自适应 `max(8, min(15, ceil(cores*1.0)))`，
+      `_pump` 以它为上限）——多路同时拉流/起播、快速铺首屏。
+    - **录制（编码）**另由信号量限制到 `MAX_CONCURRENT_RECORD`（自适应 `max(2, min(4, ceil(cores*0.35)))`，
+      弱机 2 / 常见 3 / 强机最高 4）：`_startLoad` 在 `playing` 时**立刻释放加载槽**并 `_pump()`，再
+      `_acquireRecordSlot(recordFn)`；满则把 `recordFn` 排进 `_recordWaiters`、该路 live 继续播等位。
+      `finalizeLoop`/`cleanup`/早退用 `createLoadSlotHolder` 防二次减加载槽；据 `recordStarted` 调
+      `_releaseRecordSlot()` 或 `_cancelRecordWaiter()`。公式与释槽语义抽在 `preload-concurrency.js`，
+      单测见 `test/preload.test.mjs`（`npm test`）。
+    - 画质：`CLIP_BITRATE=800000`；`RECORD_MS` 自 1.4.3 起为 **6000**（加快录制槽周转）。
+    - 监控面板：「片段加载 进行/排队/上限」读 `MAX_CONCURRENT`，「录制（编码）进行/上限」读
+      `activeRecords`/`MAX_CONCURRENT_RECORD`。
+    - 背景：1.4.0 曾用录制上限当加载上限；1.4.1 分离常量但仍把 `activeLoads` 占到录完；
+      1.4.3 出画面即释加载槽，避免录制 2–4 路堵死整墙拉流。
 
 16. 分批滚动加载（`modal.js`，自 1.4.0 起）：`renderLiveList` 首批 `RENDER_BATCH=60`，末尾 `.live-grid-sentinel`
     哨兵 + `_batchObserver`（rootMargin 600px）滚到底追加下一批；`_appendCards` 复用建卡逻辑并对每张

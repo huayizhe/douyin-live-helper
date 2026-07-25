@@ -5,6 +5,16 @@
 
 ---
 
+## [1.4.3] - 2026-07-25
+
+### 性能
+- **出画面即释放加载槽**（`preload.js`）：`playing` 后立刻 `activeLoads--` 并 `_pump()`，加载与录制真正解耦；此前加载槽一直占到录制结束，录制上限 2–3 会堵死整条拉流流水线。`finalizeLoop` / `cleanup` / 早退路径用标志位防二次减槽；录制仍只走 `activeRecords` / `_recordWaiters`。
+- **提高视口加载并发**：`MAX_CONCURRENT` 字面/硬上限 **15**，自适应 `max(8, min(15, ceil(cores*1.0)))`（弱机 ≥8、强机到 15）；`MAX_CONCURRENT_RECORD` 弱机 2 / 常见 3 / 强机最高 **4**（`max(2, min(4, ceil(cores*0.35)))`）。
+- **录制时长**：`RECORD_MS` 8000→**6000**（加快录制槽周转）；`CLIP_BITRATE` 保持 800k。
+- 单元测试：`test/preload.test.mjs`（`npm test`）覆盖并发公式、playing 释槽、`_pump` 续载、录制上限约束。
+
+---
+
 ## [1.4.2] - 2026-06-12
 
 ### 性能 / 修复
