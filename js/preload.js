@@ -69,18 +69,55 @@ export const PreloadManager = {
         if (!HLS) {
             Logger.error('HLS.js 未加载，循环片段功能不可用');
         }
-        // E：按设备逻辑核数自适应——加载 concurrent≈核数（下限 8、上限 15），首屏尽快铺满 live；
-        // 录制 concurrent≈核数*0.35（下限 2、上限 4），只削编码峰，绝不回堵加载槽。
-        const cores = navigator.hardwareConcurrency || 6; // 未知时按中端 6 核处理
-        this.MAX_CONCURRENT = computeLoadConcurrency(cores, this.MAX_CONCURRENT);
-        this.MAX_CONCURRENT_RECORD = computeRecordConcurrency(cores, this.MAX_CONCURRENT_RECORD);
-        Logger.log(`加载上限 ${this.MAX_CONCURRENT}、录制上限 ${this.MAX_CONCURRENT_RECORD}（核数 ${cores}）`);
+        // 从 Settings 读取可配置性能参数（须在 SettingsManager.init 之后调用）
+        this.applyPerfConfig(SettingsManager.getPerfConfig());
+        // 设置面板 / 跨标签变更时即时生效（已在途加载不打断，仅影响后续 _pump / 新录制）
+        SettingsManager.onPerfChange((cfg) => this.applyPerfConfig(cfg));
 
         // C：标签页切到后台只暂停「启动新的片段加载」，不暂停循环播放（回前台恢复加载）
         document.addEventListener('visibilitychange', () => {
             if (document.hidden) this.pauseLoading('hidden');
             else this.resumeLoading('hidden');
         });
+    },
+
+    /**
+     * 应用直播墙性能配置到运行时常量。
+     * auto：按核数 + 用户 cap 计算加载/录制上限；manual：直接用用户设定值。
+     * 不中断已在途的加载/录制，仅影响后续调度与新录制参数。
+     * @param {object} cfg - SettingsManager.getPerfConfig() 形态
+     */
+    applyPerfConfig(cfg) {
+        if (!cfg || typeof cfg !== 'object') return;
+        const cores = navigator.hardwareConcurrency || 6;
+        const loadCap = Number(cfg.maxConcurrent) > 0 ? Number(cfg.maxConcurrent) : 15;
+        const recordCap = Number(cfg.maxConcurrentRecord) > 0 ? Number(cfg.maxConcurrentRecord) : 4;
+
+        if (cfg.perfMode === 'manual') {
+            // 手动：滑块值即生效上限（仍落在公式同款区间内，由 Settings 钳制）
+            this.MAX_CONCURRENT = Math.max(8, Math.min(15, Math.round(loadCap)));
+            this.MAX_CONCURRENT_RECORD = Math.max(2, Math.min(4, Math.round(recordCap)));
+        } else {
+            // 自动：核数自适应，用户滑块仅作硬上限 cap
+            this.MAX_CONCURRENT = computeLoadConcurrency(cores, loadCap);
+            this.MAX_CONCURRENT_RECORD = computeRecordConcurrency(cores, recordCap);
+        }
+
+        if (Number(cfg.recordMs) > 0) this.RECORD_MS = Number(cfg.recordMs);
+        if (Number(cfg.clipBitrate) > 0) this.CLIP_BITRATE = Number(cfg.clipBitrate);
+        if (Number(cfg.maxCache) > 0) this.MAX_CACHE = Math.round(Number(cfg.maxCache));
+        // clipMaxAgeMin 为分钟 → 内部毫秒
+        if (Number(cfg.clipMaxAgeMin) > 0) {
+            this.CLIP_MAX_AGE = Number(cfg.clipMaxAgeMin) * 60 * 1000;
+        }
+
+        Logger.log(
+            `性能参数已应用：模式=${cfg.perfMode || 'auto'} 加载=${this.MAX_CONCURRENT} 录制=${this.MAX_CONCURRENT_RECORD}` +
+            ` 时长=${this.RECORD_MS}ms 码率=${this.CLIP_BITRATE} 缓存=${this.MAX_CACHE} 过期=${cfg.clipMaxAgeMin}min` +
+            `（核数 ${cores}）`
+        );
+        // 上限变大时尝试继续调度排队任务
+        this._pump();
     },
 
     /**

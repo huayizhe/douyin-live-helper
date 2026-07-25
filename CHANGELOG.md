@@ -5,6 +5,18 @@
 
 ---
 
+## [1.4.4] - 2026-07-25
+
+### 功能
+- **资源/设置三标签页**（`monitor.js` / `modal.js`）：顶栏「资源」改为「资源/设置」，统一浮层面板含三个 Tab——资源监控、插件设置、数据备份；打开默认落在监控；监控仅在该 Tab 激活时 1s 采样（切走停采样）。去掉顶栏独立「备份」按钮，导入/导出特别关心迁入第三 Tab。
+- **直播墙性能参数可配置**（`settings.js` / `preload.js`）：插件设置 Tab 可调并发模式（自动/手动）、同时加载/录制路数、片段时长/码率、进视口停留、缓存上限、过期重录；默认值 = 1.4.3 行为；即时写入 `chrome.storage.local`（`dylh_settings`）并 `PreloadManager.applyPerfConfig`；支持一键还原。`modal.CLIP_SETTLE_MS` 改为读设置。
+
+### 测试 / 文档
+- 新增 `test/settings-perf.test.mjs`：默认值、钳制、`resetPerfConfig`、auto/manual 生效值。
+- 版本升至 1.4.4；同步 README / DEV。
+
+---
+
 ## [1.4.3] - 2026-07-25
 
 ### 性能

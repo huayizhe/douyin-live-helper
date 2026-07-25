@@ -49,6 +49,7 @@
 6. 声音与音量：
    - 顶部声音总开关（放音/静音）+ 全局音量记忆，使用 chrome.storage.local 存储 (settings.js)
    - 悬浮预览、大屏预览声音状态互相同步
+   - 自 1.4.4 起，同文件还存直播墙性能参数（`getPerfConfig` / `setPerfConfig` / `resetPerfConfig`）
 
 7. 直播录制：
    - 大屏单路 / 对比单路 / 对比合并录制，统一 10Mbps 高码率保证清晰度
@@ -59,7 +60,11 @@
    - 文件命名区分：`抖音对比-单路_…` / `抖音对比-合并_…`
    - 大屏录制指示器：左下角红色闪烁圆点 + 时间；停止仅弹一条「视频保存成功」（不再「录制已停止」+「保存成功」双弹）
 
-8. 资源监控 (monitor.js)：顶部按钮查看内存 / HLS 实例 / 视频元素占用
+8. 资源 / 设置统一面板 (monitor.js，自 1.4.4)：
+   - 顶栏「资源/设置」打开；三 Tab：资源监控 / 插件设置 / 数据备份
+   - 监控：内存 / HLS / video；仅监控 Tab 激活时 1s 采样
+   - 插件设置：直播墙性能参数（自动/手动并发、时长、码率、settle、缓存、过期），即时 `SettingsManager.setPerfConfig` → `PreloadManager.applyPerfConfig`，一键还原
+   - 数据备份：特别关心导入/导出（原顶栏「备份」按钮已移除）
 
 9. 快捷跳转：
    - 点击直播画面进入大屏预览，点击标题跳转直播间，点击主播头像跳转个人主页
@@ -105,18 +110,19 @@ douyinfollowplugin/
 │   ├── card.js         # 直播卡片模块，负责创建卡片、对比复选框、点击跳转
 │   ├── preview.js      # 预览模块：悬浮预览、大屏预览、三联屏、多路对比、录制
 │   ├── favorite.js     # 特别关心模块（chrome.storage.local + 内存缓存；含导入/导出）
-│   ├── settings.js     # 全局设置模块：音量/声音总开关（chrome.storage.local）
+│   ├── settings.js     # 全局设置：音量/声音 + 直播墙性能参数（chrome.storage.local）
 │   ├── stats.js        # 本地观看统计：每主播本周次数/时长（chrome.storage.local，按 ISO 周清零）
 │   ├── license.js      # PRO 授权：离线 ECDSA 验签、激活/解除、权益对比升级页
 │   ├── preload.js      # 预加载管理（按需）
 │   ├── preload-concurrency.js # 加载/录制并发公式与加载槽持有器（纯函数，单测共用）
-│   ├── monitor.js      # 资源监控模块
+│   ├── monitor.js      # 资源/设置统一面板（监控 / 性能设置 / 备份）
 │   ├── toast.js        # 轻提示模块
 │   ├── constants.js    # 常量定义（选择器、清晰度、语音等）
 │   ├── utils.js        # 通用工具模块（DOM/样式/网络/语音/文本）
 │   └── logger.js       # 日志模块，提供统一的日志输出
 ├── test/               # 单元测试（npm test → node --test）
-│   └── preload.test.mjs
+│   ├── preload.test.mjs
+│   └── settings-perf.test.mjs
 ├── lib/                # 第三方库
 │   └── hls.min.js      # HLS 播放器，用于直播流播放
 ├── css/                # 样式文件
@@ -231,11 +237,11 @@ douyinfollowplugin/
    - card.js: 处理直播卡片创建、对比复选框与点击跳转
    - preview.js: 悬浮/大屏/三联屏/多路对比预览与录制；大屏「切清晰度」用「续播 1.5s 再硬切」（`_switchBigScreenQuality`）
    - favorite.js: 特别关心存储（chrome.storage.local + 内存缓存；exportData/importData）
-   - settings.js: 音量/声音总开关存储（chrome.storage.local + 内存缓存）
+   - settings.js: 音量/声音总开关 + 直播墙性能参数（chrome.storage.local + 内存缓存）
    - stats.js: 本地观看统计（本周次数/时长；startSession/endSession/getWeekCount）
    - license.js: PRO 授权（离线 ECDSA 验签、激活/解除、权益对比升级页）
    - preload.js: 按需预加载管理
-   - monitor.js: 资源监控
+   - monitor.js: 资源/设置三 Tab 面板（监控 / 性能 / 备份）
    - toast.js: 轻提示
    - constants.js: 常量定义
    - utils.js: 提供通用工具函数
@@ -364,7 +370,7 @@ douyinfollowplugin/
       使排队列表持续 = 当前视口（天然优先视口，不止重渲染那一刻）。
     - **未改**：`MAX_CONCURRENT` 并发上限；缓存保留（离屏只释放解码、留 blob，靠 LRU `MAX_CACHE=120` 优先淘汰离屏）。
 
-15. 加载与录制并发分离（`preload.js`，自 1.4.1 起；**1.4.3 真正解耦加载槽**）：
+15. 加载与录制并发分离（`preload.js`，自 1.4.1 起；**1.4.3 真正解耦加载槽**；**1.4.4 参数可配置**）：
     - **加载**并发用 `MAX_CONCURRENT`（字面/硬上限 **15**，自适应 `max(8, min(15, ceil(cores*1.0)))`，
       `_pump` 以它为上限）——多路同时拉流/起播、快速铺首屏。
     - **录制（编码）**另由信号量限制到 `MAX_CONCURRENT_RECORD`（自适应 `max(2, min(4, ceil(cores*0.35)))`，
@@ -373,7 +379,10 @@ douyinfollowplugin/
       `finalizeLoop`/`cleanup`/早退用 `createLoadSlotHolder` 防二次减加载槽；据 `recordStarted` 调
       `_releaseRecordSlot()` 或 `_cancelRecordWaiter()`。公式与释槽语义抽在 `preload-concurrency.js`，
       单测见 `test/preload.test.mjs`（`npm test`）。
-    - 画质：`CLIP_BITRATE=800000`；`RECORD_MS` 自 1.4.3 起为 **6000**（加快录制槽周转）。
+    - 画质：`CLIP_BITRATE` 默认 800000；`RECORD_MS` 默认 **6000**（均可在设置面板改）。
+    - **1.4.4**：`SettingsManager` 存 `perfMode`/`maxConcurrent`/…；`PreloadManager.applyPerfConfig` 在
+      `init`（须在 Settings 之后）与 `onPerfChange` 时写入运行时常量；auto 用 `compute*`+用户 cap，
+      manual 直接用滑块值。`modal._clipSettleMs()` 读 `clipSettleMs`。单测 `test/settings-perf.test.mjs`。
     - 监控面板：「片段加载 进行/排队/上限」读 `MAX_CONCURRENT`，「录制（编码）进行/上限」读
       `activeRecords`/`MAX_CONCURRENT_RECORD`。
     - 背景：1.4.0 曾用录制上限当加载上限；1.4.1 分离常量但仍把 `activeLoads` 占到录完；
@@ -395,11 +404,10 @@ douyinfollowplugin/
     `clearPreview`（end）。`card.js` 用 `getWeekCount` 渲染「本周看 N 次」角标。`modal.js` 排序三态
     `this.sortMode`（default/popularity/mostWatched）经统一的 `_getViewList()`/`_rerenderView()` 生效。
 
-20. 特别关心导入/导出（`favorite.js` `exportData`/`importData` + `modal.js` `createBackupButton`，自 1.4.0 起）：
-    「备份」按钮弹 body 级固定定位菜单（避开 header `overflow:hidden` 裁剪）；导出 Blob 下载、导入合并去重后
-    `_rerenderView()` 刷新心标。注意 toast 第二参用字符串字面量 `'success'`/`'error'`（modal.js 未导入 `TOAST` 常量，
-    1.4.1 修复了误用 `TOAST.TYPE.*` 导致导入抛错的问题）。特别关心「筛选视图」只展示**当前在播**的关注主播，
-    离线关注不在列表内属正常（导入数量以提示「共 N 个」为准）。
+20. 特别关心导入/导出（`favorite.js` `exportData`/`importData`；自 1.4.4 起入口在 `monitor.js`「数据备份」Tab）：
+    导出 Blob 下载、导入合并去重后经 `ResourceMonitor.setFavoritesChangeHandler` 回调 `ModalUI._rerenderView()`。
+    Toast 用 `TOAST.TYPE.*`。顶栏独立「备份」按钮已移除（原 `createBackupButton` 删除）。
+    特别关心「筛选视图」只展示**当前在播**的关注主播，离线关注不在列表内属正常。
 
 21. 会员体系总开关 `LICENSE.ENABLED`（`constants.js`，自 1.4.1 起 = `false`）：
     - 关闭时 `license.js` 的 `get isPro()` 一律返回 `true` → 4 个功能门（`modal.js` N同时看、`preview.js` 录制/氛围词条）

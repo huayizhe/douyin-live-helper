@@ -16,9 +16,6 @@ import { StatsManager } from './stats.js';
 // 初始化语音合成
 SpeechUtils.init();
 
-// 初始化预加载管理器
-PreloadManager.init();
-
 /**
  * 插件主类
  */
@@ -40,7 +37,9 @@ class DouyinLivePlugin {
     try {
         Logger.log('开始加载插件');
         // 从 chrome.storage 加载特别关心缓存 + 全局设置 + 授权 + 氛围词条
+        // Settings 必须先于 PreloadManager.init，以便 applyPerfConfig 读到已加载/钳制的 perf
         await Promise.all([FavoriteManager.init(), SettingsManager.init(), LicenseManager.init(), AtmosphereManager.init(), StatsManager.init()]);
+        PreloadManager.init();
         const plugin = new DouyinLivePlugin();
         plugin.init();
     } catch (error) {

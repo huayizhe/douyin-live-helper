@@ -63,8 +63,23 @@ const ModalUI = {
     /**
      * 卡片进视口后停留多久才开始录制（毫秒）：避免快速滚动一闪而过的卡片也拉流，省无用功。
      * 命中缓存的片段不受此延迟影响，立即挂上播放。
+     * 实际取值从 SettingsManager.getPerfConfig().clipSettleMs 读取（默认 400）。
      */
     CLIP_SETTLE_MS: 400,
+
+    /**
+     * 当前生效的进视口停留毫秒（设置面板可调）。
+     * @returns {number}
+     * @private
+     */
+    _clipSettleMs() {
+        try {
+            const ms = SettingsManager.getPerfConfig().clipSettleMs;
+            return Number.isFinite(ms) ? ms : this.CLIP_SETTLE_MS;
+        } catch (_) {
+            return this.CLIP_SETTLE_MS;
+        }
+    },
 
     /**
      * 显示模态框
@@ -223,8 +238,7 @@ const ModalUI = {
         const compareButton = this.createCompareButton(isDarkMode);        // 对比预览
         const clearCompareButton = this.createClearCompareButton(isDarkMode); // 清除已选
         const scrollTopButton = this.createScrollTopButton(isDarkMode);    // 回到顶部按钮
-        const backupButton = this.createBackupButton(isDarkMode);        // 备份（导入/导出特别关心）
-        const resourceButton = this.createResourceButton(isDarkMode);     // 资源按钮
+        const resourceButton = this.createResourceButton(isDarkMode);     // 资源/设置（监控+性能参数+备份）
         // PRO 授权按钮：会员体系关闭时不创建（LICENSE.ENABLED=false）
         const licenseBtn = LICENSE.ENABLED ? LicenseManager.createLicenseBtn(isDarkMode) : null;
         const liveCount = this.createLiveCountElement(isDarkMode);   // 直播数量显示
@@ -243,14 +257,16 @@ const ModalUI = {
             overflow: 'hidden'
         };
         [favoriteButton, sortButton, refreshButton, globalSoundBtn,
-         compareButton, clearCompareButton, scrollTopButton, backupButton, resourceButton, licenseBtn, liveCount]
+         compareButton, clearCompareButton, scrollTopButton, resourceButton, licenseBtn, liveCount]
             .forEach(btn => { if (btn) Object.assign(btn.style, MENU_BTN); });
+        // 「资源/设置」文案更长，单独加宽避免裁切
+        Object.assign(resourceButton.style, { width: '120px', minWidth: '120px' });
         // PRO 按钮：与其它按钮等大（badge 由 CSS 填满整框），去掉左右 padding 让金色 badge 占满 104px
         if (licenseBtn) Object.assign(licenseBtn.style, { display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '0' });
 
         // 强迫症：不足 4 个字的标签撑成 4 字宽（两端对齐＝中间空格填充观感），>=4 字不动。
         // 声音按钮会重建 innerHTML，其 updateIcon 内已自带 _justifyShortLabel，这里不重复处理。
-        [favoriteButton, sortButton, refreshButton, compareButton, clearCompareButton, scrollTopButton, backupButton, resourceButton, globalSoundBtn]
+        [favoriteButton, sortButton, refreshButton, compareButton, clearCompareButton, scrollTopButton, resourceButton, globalSoundBtn]
             .forEach(btn => { if (btn) this._justifyShortLabel(btn.querySelector('span')); });
 
         // 搜索框：宽度 = 两个按钮宽 + 一个间隔（与按钮网格对齐显得整齐），高度对齐 36
@@ -266,6 +282,9 @@ const ModalUI = {
         // 关闭按钮：始终钉在右上角（header 已是 position:relative）
         Object.assign(closeButton.style, { position: 'absolute', top: '12px', right: '16px' });
 
+        // 注册特别关心导入后的列表刷新钩子（备份已迁入资源/设置面板，避免 monitor↔modal 循环依赖）
+        ResourceMonitor.setFavoritesChangeHandler(() => this._rerenderView());
+
         // 按顺序添加到左侧按钮组
         leftGroup.appendChild(searchInput);    // 1. 搜索框放最左边
         leftGroup.appendChild(favoriteButton); // 2. 特别关心按钮
@@ -275,10 +294,9 @@ const ModalUI = {
         leftGroup.appendChild(compareButton);  // 6. 对比预览
         leftGroup.appendChild(clearCompareButton); // 7. 清除已选
         leftGroup.appendChild(scrollTopButton);// 8. 回到顶部按钮
-        leftGroup.appendChild(backupButton);   // 9. 备份（导入/导出特别关心）
-        leftGroup.appendChild(resourceButton); // 10. 资源按钮
-        if (licenseBtn) leftGroup.appendChild(licenseBtn); // 11. PRO 授权按钮（会员开关关则无）
-        leftGroup.appendChild(liveCount);      // 12. 直播数量显示
+        leftGroup.appendChild(resourceButton); // 9. 资源/设置（含备份 Tab）
+        if (licenseBtn) leftGroup.appendChild(licenseBtn); // 10. PRO 授权按钮（会员开关关则无）
+        leftGroup.appendChild(liveCount);      // 11. 直播数量显示
 
         // 组装页眉
         header.appendChild(leftGroup);         // 左侧按钮组
@@ -768,7 +786,7 @@ const ModalUI = {
                         clearTimeout(cardPreview._clipEnterTimer);
                         cardPreview._clipEnterTimer = setTimeout(() => {
                             PreloadManager.ensureClip(live, cardPreview);
-                        }, this.CLIP_SETTLE_MS);
+                        }, this._clipSettleMs());
                     }
                 } else {
                     clearTimeout(cardPreview._clipEnterTimer);
@@ -960,109 +978,6 @@ const ModalUI = {
             this.sortMode = ORDER[(ORDER.indexOf(this.sortMode) + 1) % ORDER.length];
             button.querySelector('span').textContent = LABEL[this.sortMode];
             this._rerenderView();
-        });
-
-        return button;
-    },
-
-    /**
-     * 创建「备份」按钮：点击弹小菜单，导出 / 导入特别关心（JSON）。
-     * 菜单挂到 body 固定定位，避免被 header 的 overflow 裁剪。
-     * @private
-     */
-    createBackupButton(isDarkMode) {
-        const button = DOMUtils.createElement('button', {
-            className: 'backup-button',
-            innerHTML: `
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="${isDarkMode ? '#fff' : '#000'}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>
-                </svg>
-                <span style="margin-left: 4px;">备份</span>
-            `,
-            styles: {
-                display: 'flex', alignItems: 'center', padding: '6px 12px',
-                border: `1px solid ${isDarkMode ? '#3f3f3f' : '#ddd'}`, borderRadius: '4px',
-                background: 'transparent', color: isDarkMode ? '#fff' : '#000',
-                cursor: 'pointer', fontSize: '14px', transition: 'background-color 0.2s', justifyContent: 'center'
-            }
-        });
-        button.setAttribute('title', '导入 / 导出特别关心');
-
-        // 隐藏文件选择器（导入用）
-        const fileInput = document.createElement('input');
-        fileInput.type = 'file';
-        fileInput.accept = '.json,application/json';
-        fileInput.style.display = 'none';
-        fileInput.addEventListener('change', async () => {
-            const file = fileInput.files && fileInput.files[0];
-            if (!file) return;
-            try {
-                const text = await file.text();
-                const n = FavoriteManager.importData(text, 'merge');
-                ToastManager.show(`已导入，特别关心共 ${n} 个`, 'success');
-                this._rerenderView(); // 刷新心标
-            } catch (e) {
-                ToastManager.show('导入失败：' + e.message, 'error');
-            } finally {
-                fileInput.value = '';
-            }
-        });
-        button.appendChild(fileInput);
-
-        const doExport = () => {
-            const json = FavoriteManager.exportData();
-            const blob = new Blob([json], { type: 'application/json' });
-            const url = URL.createObjectURL(blob);
-            const d = new Date();
-            const stamp = `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}${String(d.getDate()).padStart(2, '0')}`;
-            const a = document.createElement('a');
-            a.href = url;
-            a.download = `特别关心_${stamp}.json`;
-            document.body.appendChild(a);
-            a.click();
-            a.remove();
-            setTimeout(() => URL.revokeObjectURL(url), 1000);
-            ToastManager.show('已导出特别关心', 'success');
-        };
-
-        const closeMenu = () => {
-            if (this._backupMenu) { this._backupMenu.remove(); this._backupMenu = null; }
-        };
-        const showMenu = () => {
-            closeMenu();
-            const menu = document.createElement('div');
-            Object.assign(menu.style, {
-                position: 'fixed', zIndex: '20002', minWidth: '140px',
-                background: isDarkMode ? '#252632' : '#fff',
-                border: `1px solid ${isDarkMode ? '#3f3f3f' : '#ddd'}`,
-                borderRadius: '8px', overflow: 'hidden', boxShadow: '0 4px 16px rgba(0,0,0,0.25)'
-            });
-            const r = button.getBoundingClientRect();
-            menu.style.left = `${r.left}px`;
-            menu.style.top = `${r.bottom + 6}px`;
-            const item = (label, fn) => {
-                const it = document.createElement('div');
-                it.textContent = label;
-                Object.assign(it.style, {
-                    padding: '10px 14px', fontSize: '14px', color: isDarkMode ? '#fff' : '#000',
-                    cursor: 'pointer', whiteSpace: 'nowrap'
-                });
-                it.addEventListener('mouseenter', () => { it.style.background = isDarkMode ? '#33363d' : '#f2f2f2'; });
-                it.addEventListener('mouseleave', () => { it.style.background = 'transparent'; });
-                it.addEventListener('click', (e) => { e.stopPropagation(); closeMenu(); fn(); });
-                return it;
-            };
-            menu.appendChild(item('导出特别关心', doExport));
-            menu.appendChild(item('导入特别关心', () => fileInput.click()));
-            document.body.appendChild(menu);
-            this._backupMenu = menu;
-            // 点其它地方收起
-            setTimeout(() => document.addEventListener('click', closeMenu, { once: true }), 0);
-        };
-
-        button.addEventListener('click', (e) => {
-            e.stopPropagation();
-            if (this._backupMenu) closeMenu(); else showMenu();
         });
 
         return button;
@@ -1351,7 +1266,7 @@ const ModalUI = {
     },
 
     /**
-     * 创建资源按钮
+     * 创建「资源/设置」按钮：打开统一面板（资源监控 / 插件设置 / 数据备份）。
      * @private
      */
     createResourceButton(isDarkMode) {
@@ -1360,7 +1275,7 @@ const ModalUI = {
                 <svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
                     <path d="M8 2v12M2 8h12" stroke="${isDarkMode ? '#fff' : '#000'}" stroke-width="2" stroke-linecap="round"/>
                 </svg>
-                <span style="margin-left: 4px;">资源</span>
+                <span style="margin-left: 4px;">资源/设置</span>
             `,
             styles: {
                 display: 'flex',
@@ -1375,16 +1290,16 @@ const ModalUI = {
                 transition: 'background-color 0.2s'
             }
         });
+        resourceButton.setAttribute('title', '资源监控 / 插件设置 / 数据备份');
 
-        // 添加资源按钮点击事件
+        // 打开统一面板（任何报错都弹出来，避免「点了没反应」难排查）
         resourceButton.addEventListener('click', () => {
-            // 初始化并显示资源监控面板（任何报错都弹出来，避免「点了没反应」难排查）
             try {
                 this.resourceMonitor = ResourceMonitor;
                 this.resourceMonitor.showPanel();
             } catch (e) {
-                Logger.error('打开资源监控失败:', e);
-                ToastManager.show('资源监控打开失败：' + (e && e.message), 'error');
+                Logger.error('打开资源/设置失败:', e);
+                ToastManager.show('资源/设置打开失败：' + (e && e.message), 'error');
             }
         });
 
