@@ -165,6 +165,15 @@ douyinfollowplugin/
    - 价格、客服微信、购买链接在 `constants.js` 的 `LICENSE` 常量配置。
    - **在线订阅支付**：`server/`（Node+Express）下单 → 弹二维码 → 支付回调/轮询 → 用同一私钥签发授权 → 插件自动激活。支付层适配器 `server/pay/{alipay,wechat,mock}.js`，加/换渠道不动业务。插件端 `license.js` 的 `createOrder/pollOrder/rebindToThisDevice` 对接；配置 `constants.js` 的 `SERVER` 与 `manifest.json` 域名。详见 `docs/服务器部署手册.md`。
 
+## 代码仓库
+
+- GitHub（私人）：https://github.com/huayizhe/douyin-live-helper
+- 本地远程名：`origin`（`git remote -v` 可核对）
+- 克隆：`git clone https://github.com/huayizhe/douyin-live-helper.git`
+- 推送：`git push -u origin master`（或当前分支）
+
+> 提交历史以 Git / GitHub 为准，不必单独维护「git 提交记录」文档；面向用户/版本的变更说明写在 `CHANGELOG.md`。
+
 ## 开发环境设置
 
 1. 安装 Node.js (推荐 v16+)
