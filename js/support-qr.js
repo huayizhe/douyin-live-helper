@@ -58,6 +58,20 @@ export function pickRandomDonateCopy(rand = Math.random) {
 }
 
 /**
+ * 转义文本以便安全写入 HTML。
+ * @param {string} s
+ * @returns {string}
+ */
+export function escapeHtml(s) {
+    return String(s ?? '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+}
+
+/**
  * 拼出带缓存戳的 CDN 图片 URL。
  * @param {string} base
  * @param {string} [bust=QR_CACHE_BUST]

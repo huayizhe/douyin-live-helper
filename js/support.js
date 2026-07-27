@@ -10,6 +10,7 @@ import {
     DONATE_QR_LOCAL_PATH,
     GROUP_QR_LOCAL_PATH,
     SUPPORT_CONTACT_EMAIL,
+    escapeHtml,
     getDonateQrUrl,
     getGroupQrUrl,
     pickRandomDonateCopy,
@@ -34,11 +35,12 @@ export const SupportManager = {
         const donateUrl = getDonateQrUrl();
         const groupUrl = getGroupQrUrl();
         const mail = SUPPORT_CONTACT_EMAIL;
-        const donateCopy = pickRandomDonateCopy();
+        const donateCopy = pickRandomDonateCopy() || DONATE_FALLBACK_COPY;
 
         const overlay = document.createElement('div');
         overlay.id = 'dylh-support-overlay';
         overlay.className = 'dylh-dialog-overlay';
+        // 文案直接写入 HTML，避免空节点 / 时序问题导致「看不见」
         overlay.innerHTML = `
             <div class="dylh-dialog-box dylh-support-box" role="dialog" aria-label="赞赏与交流">
                 <button type="button" class="dylh-dialog-close" id="dylh-support-close" aria-label="关闭">×</button>
@@ -47,8 +49,8 @@ export const SupportManager = {
                     <div class="dylh-support-col">
                         <img class="dylh-support-img" id="dylh-support-donate-img" alt="赞赏二维码" />
                         <div class="dylh-support-label">赞赏作者（自愿支持）</div>
-                        <div class="dylh-support-copy" id="dylh-support-donate-copy"></div>
-                        <div class="dylh-support-note" id="dylh-support-donate-status">加载中…</div>
+                        <p class="dylh-support-copy" id="dylh-support-donate-copy">${escapeHtml(donateCopy)}</p>
+                        <div class="dylh-support-note" id="dylh-support-donate-status">二维码加载中…</div>
                     </div>
                     <div class="dylh-support-col">
                         <img class="dylh-support-img" id="dylh-support-group-img" alt="微信群二维码" />
@@ -62,9 +64,6 @@ export const SupportManager = {
                 </div>
             </div>
         `;
-        // 文案用 textContent，避免 XSS / 破坏 HTML
-        const copyEl = overlay.querySelector('#dylh-support-donate-copy');
-        if (copyEl) copyEl.textContent = donateCopy;
 
         const close = () => this.hidePanel();
         overlay.addEventListener('click', (e) => {
@@ -74,6 +73,7 @@ export const SupportManager = {
 
         document.body.appendChild(overlay);
         this._overlay = overlay;
+        Logger.log('赞赏文案:', donateCopy);
 
         this._fillQrImg(overlay, '#dylh-support-donate-img', donateUrl, DONATE_QR_LOCAL_PATH, {
             statusSel: '#dylh-support-donate-status',
@@ -142,3 +142,6 @@ export const SupportManager = {
         return !!(this._overlay || document.getElementById('dylh-support-overlay'));
     }
 };
+
+/** 文案兜底（极端情况下随机函数返回空） */
+const DONATE_FALLBACK_COPY = '用得顺手就很开心；想支持的话扫码即可，不扫也完全没问题。';

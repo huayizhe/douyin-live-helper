@@ -20,6 +20,7 @@ import {
     getGroupQrUrl,
     getLocalQrUrl,
     pickRandomDonateCopy,
+    escapeHtml,
     resolveQrDisplaySrc
 } from '../js/support-qr.js';
 
@@ -63,6 +64,10 @@ describe('赞赏/交流二维码（support-qr）', () => {
         for (let i = 0; i < 20; i++) {
             assert.ok(DONATE_COPY_TEXTS.includes(pickRandomDonateCopy()));
         }
+    });
+
+    it('escapeHtml 转义特殊字符', () => {
+        assert.equal(escapeHtml('a<b>"c"'), 'a&lt;b&gt;&quot;c&quot;');
     });
 
     it('fetchQrObjectUrl：非 2xx 应抛错', async () => {
