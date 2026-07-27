@@ -1,13 +1,14 @@
 {
   "name": "douyin-live-helper",
-  "version": "1.4.9",
+  "version": "1.4.10",
   "description": "抖音关注直播助手",
   "main": "content.js",
   "scripts": {
     "watch": "rollup -c -w",
     "build": "rollup -c",
     "sync": "node scripts/release.js",
-    "release": "rollup -c && node scripts/release.js",
+    "pack": "node scripts/pack-zip.js",
+    "release": "rollup -c && node scripts/release.js && node scripts/pack-zip.js",
     "test": "node --test test/**/*.test.mjs"
   },
   "devDependencies": {

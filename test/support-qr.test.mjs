@@ -8,6 +8,7 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import {
+    DONATE_COPY_TEXTS,
     DONATE_QR_CDN_BASE,
     DONATE_QR_LOCAL_PATH,
     GROUP_QR_CDN_BASE,
@@ -18,6 +19,7 @@ import {
     getDonateQrUrl,
     getGroupQrUrl,
     getLocalQrUrl,
+    pickRandomDonateCopy,
     resolveQrDisplaySrc
 } from '../js/support-qr.js';
 
@@ -52,6 +54,15 @@ describe('赞赏/交流二维码（support-qr）', () => {
 
     it('过期联系邮箱', () => {
         assert.equal(SUPPORT_CONTACT_EMAIL, '1035864725@qq.com');
+    });
+
+    it('赞赏文案共 4 条，随机结果落在列表内', () => {
+        assert.equal(DONATE_COPY_TEXTS.length, 4);
+        assert.equal(pickRandomDonateCopy(() => 0), DONATE_COPY_TEXTS[0]);
+        assert.equal(pickRandomDonateCopy(() => 0.99), DONATE_COPY_TEXTS[3]);
+        for (let i = 0; i < 20; i++) {
+            assert.ok(DONATE_COPY_TEXTS.includes(pickRandomDonateCopy()));
+        }
     });
 
     it('fetchQrObjectUrl：非 2xx 应抛错', async () => {

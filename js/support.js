@@ -12,6 +12,7 @@ import {
     SUPPORT_CONTACT_EMAIL,
     getDonateQrUrl,
     getGroupQrUrl,
+    pickRandomDonateCopy,
     resolveQrDisplaySrc
 } from './support-qr.js';
 
@@ -33,6 +34,7 @@ export const SupportManager = {
         const donateUrl = getDonateQrUrl();
         const groupUrl = getGroupQrUrl();
         const mail = SUPPORT_CONTACT_EMAIL;
+        const donateCopy = pickRandomDonateCopy();
 
         const overlay = document.createElement('div');
         overlay.id = 'dylh-support-overlay';
@@ -45,20 +47,24 @@ export const SupportManager = {
                     <div class="dylh-support-col">
                         <img class="dylh-support-img" id="dylh-support-donate-img" alt="赞赏二维码" />
                         <div class="dylh-support-label">赞赏作者（自愿支持）</div>
+                        <div class="dylh-support-copy" id="dylh-support-donate-copy"></div>
                         <div class="dylh-support-note" id="dylh-support-donate-status">加载中…</div>
                     </div>
                     <div class="dylh-support-col">
                         <img class="dylh-support-img" id="dylh-support-group-img" alt="微信群二维码" />
                         <div class="dylh-support-label">微信交流群</div>
                         <div class="dylh-support-note" id="dylh-support-group-note">
-                            群码约 7 天过期；若已失效，请发邮件至
-                            <a class="dylh-support-mail" href="mailto:${mail}?subject=${encodeURIComponent('插件交流进群')}">${mail}</a>
-                            ，备注「插件交流进群」
+                            群码约 7 天过期，若已失效，请发邮件至
+                            <a class="dylh-support-mail" href="mailto:${mail}?subject=${encodeURIComponent('抖音直播插件交流进群')}">${mail}</a>
+                            ，备注「抖音直播插件交流进群」
                         </div>
                     </div>
                 </div>
             </div>
         `;
+        // 文案用 textContent，避免 XSS / 破坏 HTML
+        const copyEl = overlay.querySelector('#dylh-support-donate-copy');
+        if (copyEl) copyEl.textContent = donateCopy;
 
         const close = () => this.hidePanel();
         overlay.addEventListener('click', (e) => {
@@ -77,7 +83,7 @@ export const SupportManager = {
         this._fillQrImg(overlay, '#dylh-support-group-img', groupUrl, GROUP_QR_LOCAL_PATH, {
             statusSel: '#dylh-support-group-note',
             clearStatusOnOk: false,
-            failText: `群二维码加载失败。请发邮件至 <a class="dylh-support-mail" href="mailto:${mail}">${mail}</a>，备注「插件交流进群」`
+            failText: `群二维码加载失败,请发邮件至 <a class="dylh-support-mail" href="mailto:${mail}">${mail}</a>，备注「抖音直播插件交流进群」`
         });
     },
 

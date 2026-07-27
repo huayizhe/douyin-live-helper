@@ -34,6 +34,30 @@ export const GROUP_QR_CACHE_BUST = QR_CACHE_BUST;
 export const SUPPORT_CONTACT_EMAIL = '1035864725@qq.com';
 
 /**
+ * 赞赏码下方鼓励文案（打开弹窗时随机一条，无道德绑架）。
+ * @type {readonly string[]}
+ */
+export const DONATE_COPY_TEXTS = Object.freeze([
+    '如果这个插件帮到了你，随意扫一下就好，完全自愿。',
+    '做这个纯属兴趣；喜欢的话请我喝杯奶茶也行。',
+    '你的支持会让我更有动力继续维护和更新。',
+    '用得顺手就很开心；想支持的话扫码即可，不扫也完全没问题。'
+]);
+
+/**
+ * 随机取一条赞赏鼓励文案。
+ * @param {() => number} [rand=Math.random] 可注入随机源便于单测
+ * @returns {string}
+ */
+export function pickRandomDonateCopy(rand = Math.random) {
+    const list = DONATE_COPY_TEXTS;
+    if (!list.length) return '';
+    const r = typeof rand === 'function' ? rand() : Math.random();
+    const i = Math.floor(Math.max(0, Math.min(0.999999, Number(r) || 0)) * list.length);
+    return list[i];
+}
+
+/**
  * 拼出带缓存戳的 CDN 图片 URL。
  * @param {string} base
  * @param {string} [bust=QR_CACHE_BUST]

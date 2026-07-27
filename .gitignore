@@ -26,8 +26,9 @@ server/*.db-wal
 server/orders.json
 *.log
 
-# 打包产物
+# 打包产物：忽略其它 zip，但允许提交版本化安装包
 *.zip
+!抖音关注直播助手-v*.zip
 
 # 系统 / 编辑器
 .DS_Store

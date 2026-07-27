@@ -5,6 +5,16 @@
 
 ---
 
+## [1.4.10] - 2026-07-28
+
+### 功能 / 发布
+- **赞赏文案随机**：打开「赞赏/交流」时，从 4 条自愿支持文案中随机显示一条。
+- **安装包 zip 入库**：`npm run release` 同步后自动打包 `抖音关注直播助手-v*.zip`，删除根目录旧版 zip；gitignore 允许提交该系列。
+- **README**：安装说明改为下载压缩包 / [Releases 最新版](https://github.com/huayizhe/douyin-live-helper/releases/latest)。
+- **GitHub Release**：同步发布带 zip 附件的正式版。
+
+---
+
 ## [1.4.9] - 2026-07-28
 
 ### 修复 / 体验

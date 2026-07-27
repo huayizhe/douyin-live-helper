@@ -20,7 +20,7 @@
 
 | 微信进群交流 | 赞赏支持 |
 |:---:|:---:|
-| <img src="https://cdn.jsdelivr.net/gh/huayizhe/douyin-live-helper@master/hosted/wechat-group-qr.jpg?v=2" alt="微信群二维码" width="180" /> | <img src="https://cdn.jsdelivr.net/gh/huayizhe/douyin-live-helper@master/hosted/donate-qr.png?v=2" alt="赞赏二维码" width="180" /> |
+| <img src="https://cdn.jsdelivr.net/gh/huayizhe/douyin-live-helper@master/hosted/donate-qr.png?v=2" alt="赞赏二维码" width="240" /> | <img src="https://cdn.jsdelivr.net/gh/huayizhe/douyin-live-helper@master/hosted/wechat-group-qr.jpg?v=2" alt="微信群二维码" width="240" /> |
 
 
 ## 功能特点
@@ -61,9 +61,9 @@
 
 ## 安装方法
 
-> **下载本仓库中的 [`douyin_live_helper_plugin`](./douyin_live_helper_plugin) 目录**（或 Release / 压缩包中同名文件夹），用浏览器「加载已解压的扩展」选中该目录即可安装。
+> **下载最新安装包** [`抖音关注直播助手-v1.4.10.zip`](./抖音关注直播助手-v1.4.10.zip)（也可到 [Releases · 最新版](https://github.com/huayizhe/douyin-live-helper/releases/latest) 下载），解压后用浏览器「加载已解压的扩展」选中解压出的文件夹即可。
 
-> 安装前先把文件放到一个固定文件夹，**安装后请勿删除或移动该文件夹**（移动后插件会失效）。
+> 安装前请解压到一个固定文件夹，**安装后请勿删除或移动该文件夹**（移动后插件会失效）。
 
 ### Google Chrome
 1. 点击右上角 **⋮（三个点菜单）→ 扩展程序 → 管理扩展程序**；也可直接在地址栏输入 `chrome://extensions/` 回车
