@@ -1,17 +1,18 @@
 /** @charset UTF-8 */
 /**
- * 赞赏 / 交流弹窗：左右结构展示赞赏码 + 微信群码（CDN 托管）。
+ * 赞赏 / 交流弹窗：左右结构展示赞赏码 + 微信群码。
  *
- * 注意：抖音页 CSP 会拦截页面直接加载外链图片，因此用扩展权限 fetch CDN，
- * 再转成 blob: URL 赋给 <img>（blob 不受页面 img-src 限制）。
+ * 优先 CDN（fetch→blob 绕过抖音 CSP）；失败回退扩展包 hosted/ 本地图。
  */
 
 import { Logger } from './logger.js';
 import {
+    DONATE_QR_LOCAL_PATH,
+    GROUP_QR_LOCAL_PATH,
     SUPPORT_CONTACT_EMAIL,
-    fetchQrObjectUrl,
     getDonateQrUrl,
-    getGroupQrUrl
+    getGroupQrUrl,
+    resolveQrDisplaySrc
 } from './support-qr.js';
 
 /**
@@ -36,7 +37,6 @@ export const SupportManager = {
         const overlay = document.createElement('div');
         overlay.id = 'dylh-support-overlay';
         overlay.className = 'dylh-dialog-overlay';
-        // 先不写外链 src，等 fetch 成 blob 再填，避免被抖音 CSP 直接拦截
         overlay.innerHTML = `
             <div class="dylh-dialog-box dylh-support-box" role="dialog" aria-label="赞赏与交流">
                 <button type="button" class="dylh-dialog-close" id="dylh-support-close" aria-label="关闭">×</button>
@@ -44,7 +44,7 @@ export const SupportManager = {
                 <div class="dylh-support-grid">
                     <div class="dylh-support-col">
                         <img class="dylh-support-img" id="dylh-support-donate-img" alt="赞赏二维码" />
-                        <div class="dylh-support-label">赞赏支持（非强制）</div>
+                        <div class="dylh-support-label">赞赏作者（自愿支持）</div>
                         <div class="dylh-support-note" id="dylh-support-donate-status">加载中…</div>
                     </div>
                     <div class="dylh-support-col">
@@ -69,12 +69,12 @@ export const SupportManager = {
         document.body.appendChild(overlay);
         this._overlay = overlay;
 
-        this._fillQrImg(overlay, '#dylh-support-donate-img', donateUrl, {
+        this._fillQrImg(overlay, '#dylh-support-donate-img', donateUrl, DONATE_QR_LOCAL_PATH, {
             statusSel: '#dylh-support-donate-status',
             clearStatusOnOk: true,
             failText: `赞赏码加载失败。可发邮件至 <a class="dylh-support-mail" href="mailto:${mail}">${mail}</a>`
         });
-        this._fillQrImg(overlay, '#dylh-support-group-img', groupUrl, {
+        this._fillQrImg(overlay, '#dylh-support-group-img', groupUrl, GROUP_QR_LOCAL_PATH, {
             statusSel: '#dylh-support-group-note',
             clearStatusOnOk: false,
             failText: `群二维码加载失败。请发邮件至 <a class="dylh-support-mail" href="mailto:${mail}">${mail}</a>，备注「插件交流进群」`
@@ -82,36 +82,36 @@ export const SupportManager = {
     },
 
     /**
-     * fetch CDN → blob URL → 赋给 img。
+     * CDN → blob；失败则 hosted 本地兜底。
      * @private
-     * @param {HTMLElement} root
-     * @param {string} imgSel
-     * @param {string} cdnUrl
-     * @param {{ statusSel: string, clearStatusOnOk: boolean, failText: string }} opts
      */
-    async _fillQrImg(root, imgSel, cdnUrl, opts) {
+    async _fillQrImg(root, imgSel, cdnUrl, localRelPath, opts) {
         const img = root.querySelector(imgSel);
         const status = root.querySelector(opts.statusSel);
         if (!img) return;
         try {
-            const blobUrl = await fetchQrObjectUrl(cdnUrl);
-            // 弹窗可能已关
+            const { src, from, revoke } = await resolveQrDisplaySrc(cdnUrl, localRelPath);
             if (!this._overlay || this._overlay !== root) {
-                URL.revokeObjectURL(blobUrl);
+                if (revoke) {
+                    try { URL.revokeObjectURL(src); } catch (_) { /* ignore */ }
+                }
                 return;
             }
-            this._blobUrls.push(blobUrl);
-            img.src = blobUrl;
+            if (revoke) this._blobUrls.push(src);
+            img.src = src;
+            if (from === 'local') {
+                Logger.log('二维码使用本地 hosted 兜底:', localRelPath);
+            }
             if (opts.clearStatusOnOk && status) status.remove();
         } catch (e) {
-            Logger.warn('二维码 CDN 加载失败:', cdnUrl, e);
+            Logger.warn('二维码加载失败（CDN 与本地均不可用）:', cdnUrl, e);
             if (status) status.innerHTML = opts.failText;
         }
     },
 
     /**
      * 关闭赞赏/交流弹窗。
-     * @returns {boolean} 是否确实关掉了一层
+     * @returns {boolean}
      */
     hidePanel() {
         for (const u of this._blobUrls) {
@@ -130,7 +130,6 @@ export const SupportManager = {
     },
 
     /**
-     * 当前是否有赞赏/交流弹窗打开。
      * @returns {boolean}
      */
     isOpen() {

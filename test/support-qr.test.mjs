@@ -9,18 +9,23 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import {
     DONATE_QR_CDN_BASE,
+    DONATE_QR_LOCAL_PATH,
     GROUP_QR_CDN_BASE,
+    GROUP_QR_LOCAL_PATH,
     QR_CACHE_BUST,
     SUPPORT_CONTACT_EMAIL,
     getCdnQrUrl,
     getDonateQrUrl,
-    getGroupQrUrl
+    getGroupQrUrl,
+    getLocalQrUrl,
+    resolveQrDisplaySrc
 } from '../js/support-qr.js';
 
 describe('赞赏/交流二维码（support-qr）', () => {
-    it('赞赏码与群码均走 jsDelivr hosted', () => {
+    it('赞赏码与群码均走 jsDelivr hosted，并有本地相对路径', () => {
         assert.ok(DONATE_QR_CDN_BASE.includes('cdn.jsdelivr.net'));
-        assert.ok(DONATE_QR_CDN_BASE.endsWith('/hosted/donate-qr.png'));
+        assert.equal(DONATE_QR_LOCAL_PATH, 'hosted/donate-qr.png');
+        assert.equal(GROUP_QR_LOCAL_PATH, 'hosted/wechat-group-qr.jpg');
         assert.ok(GROUP_QR_CDN_BASE.endsWith('/hosted/wechat-group-qr.jpg'));
         assert.ok(QR_CACHE_BUST.length > 0);
     });
@@ -39,6 +44,10 @@ describe('赞赏/交流二维码（support-qr）', () => {
     it('getDonateQrUrl / getGroupQrUrl 默认 bust 一致', () => {
         assert.equal(getDonateQrUrl(), `${DONATE_QR_CDN_BASE}?v=${QR_CACHE_BUST}`);
         assert.equal(getGroupQrUrl(), `${GROUP_QR_CDN_BASE}?v=${QR_CACHE_BUST}`);
+    });
+
+    it('无 chrome 时 getLocalQrUrl 回传相对路径', () => {
+        assert.equal(getLocalQrUrl(DONATE_QR_LOCAL_PATH), DONATE_QR_LOCAL_PATH);
     });
 
     it('过期联系邮箱', () => {
@@ -67,6 +76,34 @@ describe('赞赏/交流二维码（support-qr）', () => {
             const u = await fetchQrObjectUrl('https://example.com/x.png');
             assert.ok(String(u).startsWith('blob:'));
             URL.revokeObjectURL(u);
+        } finally {
+            globalThis.fetch = orig;
+        }
+    });
+
+    it('resolveQrDisplaySrc：CDN 失败则回退本地', async () => {
+        const orig = globalThis.fetch;
+        let n = 0;
+        globalThis.fetch = async (url) => {
+            n++;
+            if (String(url).includes('cdn.jsdelivr')) {
+                return { ok: false, status: 503 };
+            }
+            return {
+                ok: true,
+                blob: async () => new Blob([new Uint8Array([9])], { type: 'image/png' })
+            };
+        };
+        try {
+            const r = await resolveQrDisplaySrc(
+                'https://cdn.jsdelivr.net/gh/x/hosted/a.png?v=1',
+                'hosted/donate-qr.png'
+            );
+            assert.equal(r.from, 'local');
+            assert.equal(r.revoke, true);
+            assert.ok(String(r.src).startsWith('blob:'));
+            assert.ok(n >= 2);
+            URL.revokeObjectURL(r.src);
         } finally {
             globalThis.fetch = orig;
         }
