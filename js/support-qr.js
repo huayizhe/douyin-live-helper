@@ -57,3 +57,21 @@ export function getDonateQrUrl(bust = QR_CACHE_BUST) {
 export function getGroupQrUrl(bust = QR_CACHE_BUST) {
     return getCdnQrUrl(GROUP_QR_CDN_BASE, bust);
 }
+
+/**
+ * 用扩展权限拉取 CDN 图，转为可在抖音页显示的 blob URL。
+ * （页面直接 <img src="https://cdn..."> 会被抖音 CSP 拦截；blob: 不受限）
+ * @param {string} url
+ * @returns {Promise<string>}
+ */
+export async function fetchQrObjectUrl(url) {
+    const res = await fetch(url, { cache: 'no-cache' });
+    if (!res.ok) {
+        throw new Error(`HTTP ${res.status}`);
+    }
+    const blob = await res.blob();
+    if (!blob || blob.size === 0) {
+        throw new Error('empty image');
+    }
+    return URL.createObjectURL(blob);
+}

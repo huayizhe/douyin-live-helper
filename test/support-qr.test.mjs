@@ -44,4 +44,31 @@ describe('赞赏/交流二维码（support-qr）', () => {
     it('过期联系邮箱', () => {
         assert.equal(SUPPORT_CONTACT_EMAIL, '1035864725@qq.com');
     });
+
+    it('fetchQrObjectUrl：非 2xx 应抛错', async () => {
+        const { fetchQrObjectUrl } = await import('../js/support-qr.js');
+        const orig = globalThis.fetch;
+        globalThis.fetch = async () => ({ ok: false, status: 404 });
+        try {
+            await assert.rejects(() => fetchQrObjectUrl('https://example.com/x.png'), /HTTP 404/);
+        } finally {
+            globalThis.fetch = orig;
+        }
+    });
+
+    it('fetchQrObjectUrl：成功则返回 blob: URL', async () => {
+        const { fetchQrObjectUrl } = await import('../js/support-qr.js');
+        const orig = globalThis.fetch;
+        globalThis.fetch = async () => ({
+            ok: true,
+            blob: async () => new Blob([new Uint8Array([1, 2, 3])], { type: 'image/png' })
+        });
+        try {
+            const u = await fetchQrObjectUrl('https://example.com/x.png');
+            assert.ok(String(u).startsWith('blob:'));
+            URL.revokeObjectURL(u);
+        } finally {
+            globalThis.fetch = orig;
+        }
+    });
 });
