@@ -789,8 +789,10 @@ html[dark="true"] .tab-follow-live .follow-live-icon {
   padding: 36px 40px 32px;
 }
 .dylh-support-box .dylh-dialog-title {
-  text-align: center;
-  margin-bottom: 22px;
+  text-align: left;
+  margin: 0 0 18px;
+  padding: 0 28px 14px 0; /* 右侧给关闭按钮留空，避免贴边 */
+  border-bottom: 1px solid rgba(255, 255, 255, 0.14);
 }
 .dylh-support-grid {
   display: grid;

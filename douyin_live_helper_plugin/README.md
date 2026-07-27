@@ -61,7 +61,7 @@
 
 ## 安装方法
 
-> **下载最新安装包** [`抖音关注直播助手-v1.4.10.zip`](./抖音关注直播助手-v1.4.10.zip)（也可到 [Releases · 最新版](https://github.com/huayizhe/douyin-live-helper/releases/latest) 下载），解压后用浏览器「加载已解压的扩展」选中解压出的文件夹即可。
+> **下载最新安装包** [`抖音关注直播助手-v1.4.11.zip`](./抖音关注直播助手-v1.4.11.zip)（也可到 [Releases · 最新版](https://github.com/huayizhe/douyin-live-helper/releases/latest) 下载），解压后用浏览器「加载已解压的扩展」选中解压出的文件夹即可。
 
 > 安装前请解压到一个固定文件夹，**安装后请勿删除或移动该文件夹**（移动后插件会失效）。
 
