@@ -5,6 +5,18 @@
 
 ---
 
+## [1.4.7] - 2026-07-28
+
+### 功能
+- **赞赏/交流入口**（`support.js` / `modal.js`）：顶栏「N 个直播」左侧新增「赞赏/交流」按钮；弹窗左右展示赞赏码与微信群码，统一 180×180。
+- **赞赏码打进扩展包**（`icons/qr-donate.png` + `web_accessible_resources`），本地展示、长期有效。
+- **微信群码 CDN 托管**（`hosted/wechat-group-qr.jpg` + jsDelivr）：插件只读托管链接；换群码覆盖文件并把 `GROUP_QR_CACHE_BUST` +1 后推送即可，用户无需重装。
+
+### 测试 / 文档
+- 新增 `test/support-qr.test.mjs`；同步 README / DEV / `hosted/README.md`。
+
+---
+
 ## [1.4.6] - 2026-07-25
 
 ### 体验

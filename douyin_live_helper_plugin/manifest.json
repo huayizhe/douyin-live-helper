@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "抖音关注直播助手",
-  "version": "1.4.6",
+  "version": "1.4.7",
   "description": "在抖音网页版添加关注直播功能，随时查看关注主播的直播列表，以更直观的方式展示已关注的开播主播，提升观看抖音直播的体验。支持搜索、按人气排序，点击直播截图跳转直播间，点击头像跳转主播个人资料主页。悬浮预览直播内容，支持放大观看直播内容，支持为每一个主播单独配置氛围词条和开关显示，让你在沉浸的氛围中观看直播。",
   "permissions": [
     "activeTab",
@@ -35,9 +35,19 @@
     "48": "icons/icon48.png",
     "128": "icons/icon128.png"
   },
+  "web_accessible_resources": [
+    {
+      "resources": ["icons/qr-donate.png"],
+      "matches": [
+        "*://www.douyin.com/*",
+        "*://live.douyin.com/*"
+      ]
+    }
+  ],
   "host_permissions": [
     "*://*.douyin.com/*",
+    "https://cdn.jsdelivr.net/*",
     "http://localhost:3000/*",
     "https://your-license-server.com/*"
   ]
-} 
+}

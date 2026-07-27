@@ -23,6 +23,7 @@ import {
     MENU_BTN_WIDTH_PX,
     getMenuBtnInlineStyle
 } from './menu-btn-layout.js';
+import { SupportManager } from './support.js';
 
 const ModalUI = {
     /**
@@ -119,6 +120,8 @@ const ModalUI = {
                 // 1) PRO 授权/会员信息弹窗（z-index 最高，叠在大屏之上时也要能关）
                 const proDialog = document.getElementById('dylh-overlay');
                 if (proDialog) { e.stopPropagation(); proDialog.remove(); return; }
+                // 1.5) 赞赏/交流弹窗
+                if (SupportManager.isOpen()) { e.stopPropagation(); SupportManager.hidePanel(); return; }
                 // 2) 资源监控面板（叠在大屏之上时也要能关）
                 const resPanel = document.querySelector('.resource-monitor-panel');
                 if (resPanel && resPanel.style.display !== 'none') { e.stopPropagation(); ResourceMonitor.hidePanel(); return; }
@@ -250,6 +253,7 @@ const ModalUI = {
         const resourceButton = this.createResourceButton(isDarkMode);     // 资源/设置（监控+性能参数+备份）
         // PRO 授权按钮：会员体系关闭时不创建（LICENSE.ENABLED=false）
         const licenseBtn = LICENSE.ENABLED ? LicenseManager.createLicenseBtn(isDarkMode) : null;
+        const supportButton = this.createSupportButton(isDarkMode);       // 赞赏/交流
         const liveCount = this.createLiveCountElement(isDarkMode);   // 直播数量显示
         const closeButton = this.createCloseButton(isDarkMode);      // 关闭按钮
 
@@ -257,14 +261,14 @@ const ModalUI = {
         // 「资源/设置」与其它按钮同宽，不再单独加宽
         const MENU_BTN = getMenuBtnInlineStyle();
         [favoriteButton, sortButton, refreshButton, globalSoundBtn,
-         compareButton, clearCompareButton, scrollTopButton, resourceButton, licenseBtn, liveCount]
+         compareButton, clearCompareButton, scrollTopButton, resourceButton, licenseBtn, supportButton, liveCount]
             .forEach(btn => { if (btn) Object.assign(btn.style, MENU_BTN); });
         // PRO 按钮：与其它按钮等大（badge 由 CSS 填满整框），去掉左右 padding 让金色 badge 占满 104px
         if (licenseBtn) Object.assign(licenseBtn.style, { display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '0' });
 
         // 强迫症：不足 4 个字的标签撑成 4 字宽（两端对齐＝中间空格填充观感），>=4 字不动。
         // 声音按钮会重建 innerHTML，其 updateIcon 内已自带 _justifyShortLabel，这里不重复处理。
-        [favoriteButton, sortButton, refreshButton, compareButton, clearCompareButton, scrollTopButton, resourceButton, globalSoundBtn]
+        [favoriteButton, sortButton, refreshButton, compareButton, clearCompareButton, scrollTopButton, resourceButton, supportButton, globalSoundBtn]
             .forEach(btn => { if (btn) this._justifyShortLabel(btn.querySelector('span')); });
 
         // 搜索框：宽度 = 两个按钮宽 + 一个间隔（与按钮网格对齐显得整齐），高度对齐 36
@@ -294,7 +298,8 @@ const ModalUI = {
         leftGroup.appendChild(scrollTopButton);// 8. 回到顶部按钮
         leftGroup.appendChild(resourceButton); // 9. 资源/设置（含备份 Tab）
         if (licenseBtn) leftGroup.appendChild(licenseBtn); // 10. PRO 授权按钮（会员开关关则无）
-        leftGroup.appendChild(liveCount);      // 11. 直播数量显示
+        leftGroup.appendChild(supportButton);  // 11. 赞赏/交流（在人数左侧）
+        leftGroup.appendChild(liveCount);      // 12. 直播数量显示
 
         // 组装页眉
         header.appendChild(leftGroup);         // 左侧按钮组
@@ -1301,6 +1306,45 @@ const ModalUI = {
         });
 
         return resourceButton;
+    },
+
+    /**
+     * 创建「赞赏/交流」按钮：打开左右双码弹窗（本地赞赏码 + CDN 群码）。
+     * @private
+     */
+    createSupportButton(isDarkMode) {
+        const btn = DOMUtils.createElement('button', {
+            className: 'dylh-support-btn',
+            innerHTML: `
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"
+                          stroke="${isDarkMode ? '#fff' : '#000'}" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+                </svg>
+                <span style="margin-left: 4px;">赞赏/交流</span>
+            `,
+            styles: {
+                display: 'flex',
+                alignItems: 'center',
+                padding: '6px 12px',
+                border: `1px solid ${isDarkMode ? '#3f3f3f' : '#ddd'}`,
+                borderRadius: '4px',
+                background: 'transparent',
+                color: isDarkMode ? '#fff' : '#000',
+                cursor: 'pointer',
+                fontSize: '14px',
+                transition: 'background-color 0.2s'
+            }
+        });
+        btn.setAttribute('title', '赞赏支持 / 微信交流群');
+        btn.addEventListener('click', () => {
+            try {
+                SupportManager.showPanel();
+            } catch (e) {
+                Logger.error('打开赞赏/交流失败:', e);
+                ToastManager.show('打开失败：' + (e && e.message), 'error');
+            }
+        });
+        return btn;
     },
 
     /**

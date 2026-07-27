@@ -781,3 +781,52 @@ html[dark="true"] .tab-follow-live .follow-live-icon {
   18%  { opacity: 0.65; }
   100% { opacity: 0.5;  transform: translateY(-16px) rotate(var(--rot, 0deg)); }
 }
+
+/* ── 赞赏 / 交流：左右双码弹窗 ── */
+.dylh-support-box {
+  width: 560px;
+  max-width: 94vw;
+}
+.dylh-support-hint {
+  margin: -8px 0 18px;
+  font-size: 13px;
+  color: rgba(255, 255, 255, 0.55);
+  line-height: 1.5;
+}
+.dylh-support-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 20px;
+}
+.dylh-support-col {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  min-width: 0;
+}
+.dylh-support-label {
+  font-size: 14px;
+  font-weight: 600;
+  color: #fff;
+  margin-bottom: 10px;
+}
+.dylh-support-img {
+  width: 180px;
+  height: 180px;
+  max-width: 100%;
+  object-fit: contain;
+  border-radius: 8px;
+  background: #fff;
+  padding: 8px;
+  box-sizing: border-box;
+}
+.dylh-support-note {
+  margin-top: 8px;
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.4);
+  line-height: 1.4;
+}
+@media (max-width: 520px) {
+  .dylh-support-grid { grid-template-columns: 1fr; }
+}
