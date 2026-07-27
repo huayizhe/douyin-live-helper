@@ -1,6 +1,6 @@
 {
   "name": "douyin-live-helper",
-  "version": "1.4.7",
+  "version": "1.4.8",
   "description": "抖音关注直播助手",
   "main": "content.js",
   "scripts": {

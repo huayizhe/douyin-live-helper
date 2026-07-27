@@ -2,16 +2,18 @@
 
 本目录文件通过 [jsDelivr](https://www.jsdelivr.com/) 从公开 GitHub 仓库分发，国内一般可较快访问。
 
-## 微信群二维码
+| 文件 | 用途 | CDN |
+|------|------|-----|
+| `donate-qr.png` | 赞赏码 | `…/hosted/donate-qr.png?v=N` |
+| `wechat-group-qr.jpg` | 微信群码 | `…/hosted/wechat-group-qr.jpg?v=N` |
 
-- 文件：`wechat-group-qr.jpg`
-- CDN 示例：`https://cdn.jsdelivr.net/gh/huayizhe/douyin-live-helper@master/hosted/wechat-group-qr.jpg?v=1`
+完整前缀：`https://cdn.jsdelivr.net/gh/huayizhe/douyin-live-helper@master/hosted/`
 
-### 如何更换群码（约 7 天过期后）
+### 如何更换（赞赏或群码）
 
-1. 用新的群二维码图片覆盖 `hosted/wechat-group-qr.jpg`（建议仍用 JPG）
-2. 把 `js/support-qr.js` 里的 `GROUP_QR_CACHE_BUST` 数字 **+1**（强制刷新 CDN 缓存）
-3. 提交并推送到 `master`
-4. 用户刷新抖音页面即可看到新码（无需重装插件）
+1. 覆盖对应图片文件  
+2. 把 `js/support-qr.js` 里的 `QR_CACHE_BUST` 数字 **+1**  
+3. 提交并推送到 `master`  
+4. 用户刷新抖音页面即可（无需重装插件）
 
-赞赏码打在扩展包 `icons/qr-donate.png` 内，换赞赏码需覆盖该文件后重新 `npm run release` 并发布新包。
+群码约 7 天过期；失效可发邮件至 `1035864725@qq.com`，备注「插件交流进群」。

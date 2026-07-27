@@ -1272,10 +1272,14 @@ const ModalUI = {
      * @private
      */
     createResourceButton(isDarkMode) {
+        const stroke = isDarkMode ? '#fff' : '#000';
+        // 设置齿轮图标（替代原「+」）
         const resourceButton = DOMUtils.createElement('button', {
             innerHTML: `
-                <svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
-                    <path d="M8 2v12M2 8h12" stroke="${isDarkMode ? '#fff' : '#000'}" stroke-width="2" stroke-linecap="round"/>
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <circle cx="12" cy="12" r="3" stroke="${stroke}" stroke-width="2"/>
+                    <path d="M12 1v2.5M12 20.5V23M4.22 4.22l1.77 1.77M18.01 18.01l1.77 1.77M1 12h2.5M20.5 12H23M4.22 19.78l1.77-1.77M18.01 5.99l1.77-1.77"
+                          stroke="${stroke}" stroke-width="2" stroke-linecap="round"/>
                 </svg>
                 <span style="margin-left: 4px;">资源/设置</span>
             `,
@@ -1309,16 +1313,18 @@ const ModalUI = {
     },
 
     /**
-     * 创建「赞赏/交流」按钮：打开左右双码弹窗（本地赞赏码 + CDN 群码）。
+     * 创建「赞赏/交流」按钮：打开左右双码弹窗（赞赏码 + 群码均 CDN）。
      * @private
      */
     createSupportButton(isDarkMode) {
+        const stroke = isDarkMode ? '#fff' : '#000';
+        // 交流气泡图标（替代爱心）
         const btn = DOMUtils.createElement('button', {
             className: 'dylh-support-btn',
             innerHTML: `
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                    <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"
-                          stroke="${isDarkMode ? '#fff' : '#000'}" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+                    <path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"
+                          stroke="${stroke}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
                 </svg>
                 <span style="margin-left: 4px;">赞赏/交流</span>
             `,
