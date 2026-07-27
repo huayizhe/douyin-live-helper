@@ -7,6 +7,18 @@ node_modules/
 server/.env
 tools/private-key.json
 
+# ---------- 仅本地保留、不上传远程仓库 ----------
+# 开发文档（本地维护，不进入公开仓库）
+DEV.md
+
+# 付费 / 运营相关（本地可留，不上传）
+docs/
+tools/
+server/
+
+# 介绍截图目录（已废弃）
+介绍图片/
+
 # 运行时数据
 server/*.db
 server/*.db-shm

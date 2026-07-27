@@ -16,7 +16,7 @@
     "@rollup/plugin-terser": "^0.4.4",
     "rollup": "^2.60.0"
   },
-  "license": "MIT",
+  "license": "CC-BY-NC-4.0",
   "private": true,
   "dependencies": {
     "douyin-live-helper": "file:"

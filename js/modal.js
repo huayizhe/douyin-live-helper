@@ -19,6 +19,10 @@ import {
     PLAY_THRESHOLDS,
     shouldPlayCard
 } from './playback-gate.js';
+import {
+    MENU_BTN_WIDTH_PX,
+    getMenuBtnInlineStyle
+} from './menu-btn-layout.js';
 
 const ModalUI = {
     /**
@@ -250,22 +254,11 @@ const ModalUI = {
         const closeButton = this.createCloseButton(isDarkMode);      // 关闭按钮
 
         // 统一菜单按钮宽高（整洁排列）：文字不换行、固定 104×36、居中、换行时不拉伸
-        const MENU_BTN = {
-            height: '36px',
-            width: '104px',
-            minWidth: '104px',
-            padding: '0 10px',
-            boxSizing: 'border-box',
-            justifyContent: 'center',
-            whiteSpace: 'nowrap',
-            flex: '0 0 auto',
-            overflow: 'hidden'
-        };
+        // 「资源/设置」与其它按钮同宽，不再单独加宽
+        const MENU_BTN = getMenuBtnInlineStyle();
         [favoriteButton, sortButton, refreshButton, globalSoundBtn,
          compareButton, clearCompareButton, scrollTopButton, resourceButton, licenseBtn, liveCount]
             .forEach(btn => { if (btn) Object.assign(btn.style, MENU_BTN); });
-        // 「资源/设置」文案更长，单独加宽避免裁切
-        Object.assign(resourceButton.style, { width: '120px', minWidth: '120px' });
         // PRO 按钮：与其它按钮等大（badge 由 CSS 填满整框），去掉左右 padding 让金色 badge 占满 104px
         if (licenseBtn) Object.assign(licenseBtn.style, { display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '0' });
 
@@ -275,7 +268,7 @@ const ModalUI = {
             .forEach(btn => { if (btn) this._justifyShortLabel(btn.querySelector('span')); });
 
         // 搜索框：宽度 = 两个按钮宽 + 一个间隔（与按钮网格对齐显得整齐），高度对齐 36
-        const btnW = parseInt(MENU_BTN.width, 10);   // 104
+        const btnW = MENU_BTN_WIDTH_PX;
         const searchW = btnW * 2 + 10;               // 两按钮 + 一个 gap(10)
         Object.assign(searchInput.style, {
             width: `${searchW}px`,

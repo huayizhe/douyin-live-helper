@@ -18,6 +18,11 @@ import {
     getMonitorPanelShellStyles
 } from '../js/monitor-panel-layout.js';
 import {
+    MENU_BTN_WIDTH_PX,
+    MENU_BTN_HEIGHT_PX,
+    getMenuBtnInlineStyle
+} from '../js/menu-btn-layout.js';
+import {
     HOVER_LIVE_Z_INDEX,
     shouldPauseLoopAfterHoverLive
 } from '../js/hover-preview-gate.js';
@@ -54,6 +59,19 @@ describe('监控面板固定壳高（monitor-panel-layout）', () => {
         const s = getMonitorPanelShellStyles();
         assert.equal(s.height, MONITOR_PANEL_SHELL_HEIGHT);
         assert.equal(s.maxHeight, MONITOR_PANEL_SHELL_HEIGHT);
+    });
+});
+
+describe('顶栏菜单按钮统一尺寸（menu-btn-layout）', () => {
+    it('宽高固定为 104×36，含资源/设置在内无单独加宽', () => {
+        assert.equal(MENU_BTN_WIDTH_PX, 104);
+        assert.equal(MENU_BTN_HEIGHT_PX, 36);
+        const s = getMenuBtnInlineStyle();
+        assert.equal(s.width, '104px');
+        assert.equal(s.minWidth, '104px');
+        assert.equal(s.height, '36px');
+        assert.equal(s.flex, '0 0 auto');
+        assert.equal(s.overflow, 'hidden');
     });
 });
 
