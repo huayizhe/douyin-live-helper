@@ -14,6 +14,8 @@ import {
     GROUP_QR_CDN_BASE,
     GROUP_QR_LOCAL_PATH,
     QR_CACHE_BUST,
+    QR_CDN_COMMIT,
+    QR_CDN_REPO_PREFIX,
     SUPPORT_CONTACT_EMAIL,
     getCdnQrUrl,
     getDonateQrUrl,
@@ -31,6 +33,17 @@ describe('赞赏/交流二维码（support-qr）', () => {
         assert.equal(GROUP_QR_LOCAL_PATH, 'hosted/wechat-group-qr.jpg');
         assert.ok(GROUP_QR_CDN_BASE.endsWith('/hosted/wechat-group-qr.jpg'));
         assert.ok(QR_CACHE_BUST.length > 0);
+    });
+
+    it('CDN 前缀钉 commit SHA，不使用 @master', () => {
+        assert.ok(QR_CDN_COMMIT && /^[0-9a-f]{7,40}$/i.test(QR_CDN_COMMIT));
+        assert.equal(
+            QR_CDN_REPO_PREFIX,
+            `https://cdn.jsdelivr.net/gh/huayizhe/douyin-live-helper@${QR_CDN_COMMIT}/hosted`
+        );
+        assert.ok(!QR_CDN_REPO_PREFIX.includes('@master'));
+        assert.ok(DONATE_QR_CDN_BASE.includes(`@${QR_CDN_COMMIT}/`));
+        assert.ok(GROUP_QR_CDN_BASE.includes(`@${QR_CDN_COMMIT}/`));
     });
 
     it('getCdnQrUrl 追加缓存戳', () => {

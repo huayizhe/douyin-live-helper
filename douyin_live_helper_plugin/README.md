@@ -18,9 +18,9 @@
 插件顶栏「赞赏/交流」也可打开同样的双码弹窗（赞赏码与微信群码均由 CDN 托管，换图推送即可，无需重装插件）。
 微信群码约 7 天过期（**上次更新：2026-08-07**）；若已失效，请发邮件至 [1035864725@qq.com](mailto:1035864725@qq.com)，备注「插件交流进群」。
 
-| 微信进群交流 | 赞赏支持 |
+| 赞赏支持 | 微信进群交流 |
 |:---:|:---:|
-| <img src="https://cdn.jsdelivr.net/gh/huayizhe/douyin-live-helper@master/hosted/wechat-group-qr.jpg?v=3" alt="微信群二维码" width="240" /> | <img src="https://cdn.jsdelivr.net/gh/huayizhe/douyin-live-helper@master/hosted/donate-qr.png?v=3" alt="赞赏二维码" width="240" /> |
+| <img src="https://cdn.jsdelivr.net/gh/huayizhe/douyin-live-helper@9f2080b/hosted/donate-qr.png?v=4" alt="赞赏二维码" width="240" /> | <img src="https://cdn.jsdelivr.net/gh/huayizhe/douyin-live-helper@9f2080b/hosted/wechat-group-qr.jpg?v=4" alt="微信群二维码" width="240" /> |
 
 
 ## 功能特点

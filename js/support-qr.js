@@ -5,9 +5,16 @@
  * 优先 CDN（换图推仓库即可）；失败时回退扩展包内 hosted/ 同名文件。
  */
 
-/** jsDelivr 仓库前缀 */
+/**
+ * 钉死到含最新 hosted 二维码的 commit（短 SHA 即可）。
+ * 勿再用 @master：jsDelivr 对分支可能长期吐旧缓存；commit 资源按版本永久缓存。
+ * 换图后：先推送图片 commit → 把本常量改为该 SHA → QR_CACHE_BUST +1 → release 再推。
+ */
+export const QR_CDN_COMMIT = '9f2080b';
+
+/** jsDelivr 仓库前缀（按 commit 固定，避免 @master 陈旧缓存） */
 export const QR_CDN_REPO_PREFIX =
-    'https://cdn.jsdelivr.net/gh/huayizhe/douyin-live-helper@master/hosted';
+    `https://cdn.jsdelivr.net/gh/huayizhe/douyin-live-helper@${QR_CDN_COMMIT}/hosted`;
 
 /** 赞赏码 CDN 基址（源文件：hosted/donate-qr.png） */
 export const DONATE_QR_CDN_BASE = `${QR_CDN_REPO_PREFIX}/donate-qr.png`;
@@ -22,10 +29,10 @@ export const DONATE_QR_LOCAL_PATH = 'hosted/donate-qr.png';
 export const GROUP_QR_LOCAL_PATH = 'hosted/wechat-group-qr.jpg';
 
 /**
- * 二维码缓存戳：换任一托管图并推送后把数字 +1，强制刷新 CDN。
+ * 二维码缓存戳：换任一托管图并钉好 QR_CDN_COMMIT 后把数字 +1。
  * @type {string}
  */
-export const QR_CACHE_BUST = '3';
+export const QR_CACHE_BUST = '4';
 
 /** @deprecated 使用 QR_CACHE_BUST */
 export const GROUP_QR_CACHE_BUST = QR_CACHE_BUST;

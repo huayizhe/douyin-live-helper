@@ -55,6 +55,7 @@ export const SupportManager = {
                     <div class="dylh-support-col">
                         <img class="dylh-support-img" id="dylh-support-group-img" alt="微信群二维码" />
                         <div class="dylh-support-label">微信交流群</div>
+                        <div class="dylh-support-note" id="dylh-support-group-status">二维码加载中…</div>
                         <div class="dylh-support-note" id="dylh-support-group-note">
                             群码约 7 天过期，若已失效，请发邮件至
                             <a class="dylh-support-mail" href="mailto:${mail}?subject=${encodeURIComponent('抖音直播插件交流进群')}">${mail}</a>
@@ -77,18 +78,27 @@ export const SupportManager = {
 
         this._fillQrImg(overlay, '#dylh-support-donate-img', donateUrl, DONATE_QR_LOCAL_PATH, {
             statusSel: '#dylh-support-donate-status',
-            clearStatusOnOk: true,
             failText: `赞赏码加载失败。可发邮件至 <a class="dylh-support-mail" href="mailto:${mail}">${mail}</a>`
         });
         this._fillQrImg(overlay, '#dylh-support-group-img', groupUrl, GROUP_QR_LOCAL_PATH, {
-            statusSel: '#dylh-support-group-note',
-            clearStatusOnOk: false,
+            statusSel: '#dylh-support-group-status',
+            noteSel: '#dylh-support-group-note',
             failText: `群二维码加载失败,请发邮件至 <a class="dylh-support-mail" href="mailto:${mail}">${mail}</a>，备注「抖音直播插件交流进群」`
         });
     },
 
     /**
-     * CDN → blob；失败则 hosted 本地兜底。
+     * 将 resolveQrDisplaySrc 的 from 转为中文来源文案。
+     * @param {'cdn' | 'local'} from
+     * @returns {string}
+     * @private
+     */
+    _qrSourceLabel(from) {
+        return from === 'cdn' ? '来源：CDN' : '来源：本地兜底';
+    },
+
+    /**
+     * CDN → blob；失败则 hosted 本地兜底；成功后在 status 显示来源。
      * @private
      */
     async _fillQrImg(root, imgSel, cdnUrl, localRelPath, opts) {
@@ -107,11 +117,19 @@ export const SupportManager = {
             img.src = src;
             if (from === 'local') {
                 Logger.log('二维码使用本地 hosted 兜底:', localRelPath);
+            } else {
+                Logger.log('二维码使用 CDN:', localRelPath);
             }
-            if (opts.clearStatusOnOk && status) status.remove();
+            // 加载成功：展示 CDN / 本地兜底，便于排查「扫码过期是否因缓存」
+            if (status) status.textContent = this._qrSourceLabel(from);
         } catch (e) {
             Logger.warn('二维码加载失败（CDN 与本地均不可用）:', cdnUrl, e);
             if (status) status.innerHTML = opts.failText;
+            // 群码失败时隐藏过期说明，避免与失败文案重复
+            if (opts.noteSel) {
+                const note = root.querySelector(opts.noteSel);
+                if (note) note.remove();
+            }
         }
     },
 
