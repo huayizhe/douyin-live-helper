@@ -25,7 +25,7 @@ export const GROUP_QR_LOCAL_PATH = 'hosted/wechat-group-qr.jpg';
  * 二维码缓存戳：换任一托管图并推送后把数字 +1，强制刷新 CDN。
  * @type {string}
  */
-export const QR_CACHE_BUST = '2';
+export const QR_CACHE_BUST = '3';
 
 /** @deprecated 使用 QR_CACHE_BUST */
 export const GROUP_QR_CACHE_BUST = QR_CACHE_BUST;
